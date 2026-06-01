@@ -1,0 +1,15 @@
+export const UDP_PORT = 19876
+export const TCP_PORT_DEFAULT = 19877
+export const TCP_PORT_MAX = 19886
+export const BROADCAST_INTERVAL_MS = 5000
+export const ONLINE_TIMEOUT_MS = 15000
+export const SCAN_TIMEOUT_MS = 10000
+export const KEY_EXPIRY_MS = 3600000
+export const FILE_CHUNK_SIZE = 65536
+export const MAX_FILE_SIZE = 2147483648
+export const APP_DATA_DIR = 'HongYan'
+export const DB_NAME = 'hongyan.db'
+export const MASTER_KEY_FILE = 'master.key'
+export const CONFIG_FILE = 'identity.json'
+export const FILES_DIR = 'files'
+export const LOGS_DIR = 'logs'
