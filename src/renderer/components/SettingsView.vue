@@ -60,6 +60,60 @@
           </div>
         </section>
 
+        <!-- 存储设置 -->
+        <section class="settings-section">
+          <h4 class="section-title">存储设置</h4>
+          
+          <div class="setting-item path-setting">
+            <div class="path-label-row">
+              <label for="download-path">默认下载路径</label>
+              <span class="path-hint">接收文件时默认保存位置</span>
+            </div>
+            <div class="path-input-row">
+              <input 
+                id="download-path"
+                v-model="localConfig.downloadPath" 
+                placeholder="点击右侧按钮选择目录"
+                readonly
+                class="path-input"
+              />
+              <button class="browse-btn" @click="selectDownloadPath" title="选择目录">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                </svg>
+                浏览
+              </button>
+            </div>
+          </div>
+
+          <div class="setting-item path-setting">
+            <div class="path-label-row">
+              <label for="user-data-dir">数据目录</label>
+              <span class="path-hint warning">修改后需要重启应用生效</span>
+            </div>
+            <div class="path-input-row">
+              <input 
+                id="user-data-dir"
+                v-model="localConfig.userDataDir" 
+                placeholder="点击右侧按钮选择目录"
+                readonly
+                class="path-input"
+              />
+              <button class="browse-btn" @click="selectUserDataDir" title="选择目录">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                </svg>
+                浏览
+              </button>
+            </div>
+            <p class="help-text">当前数据存储在应用配置目录中，可自定义数据存放位置</p>
+          </div>
+
+          <div class="setting-actions">
+            <button class="btn-primary" @click="saveStorageConfig">保存路径设置</button>
+          </div>
+        </section>
+
         <!-- 网段扫描配置 -->
         <section class="settings-section">
           <h4 class="section-title">网段扫描配置</h4>
@@ -101,20 +155,26 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useConfigStore } from '../stores/config-store'
+import { useFriendStore } from '../stores/friend-store'
 
 const props = defineProps<{ visible: boolean }>()
 const emit = defineEmits(['close'])
 
 const configStore = useConfigStore()
+const friendStore = useFriendStore()
 
 interface LocalConfig {
   nickname: string
   avatar?: string
+  userDataDir?: string
+  downloadPath?: string
 }
 
 const localConfig = ref<LocalConfig>({
   nickname: configStore.nickname,
-  avatar: configStore.avatar
+  avatar: configStore.avatar,
+  userDataDir: '',
+  downloadPath: ''
 })
 
 const scanSegmentsText = ref('')
@@ -126,7 +186,21 @@ onMounted(async () => {
     configStore.setConfig(config)
     localConfig.value = {
       nickname: config.nickname,
-      avatar: config.avatar
+      avatar: config.avatar,
+      userDataDir: config.userDataDir || '',
+      downloadPath: config.downloadPath || ''
+    }
+    
+    // 如果没有设置下载路径，使用默认的 Downloads 目录
+    if (!localConfig.value.downloadPath) {
+      const homeDir = await window.electronAPI.invoke('get:home-dir')
+      localConfig.value.downloadPath = `${homeDir}\\Downloads`
+    }
+    
+    // 如果没有设置 userDataDir，显示当前使用的目录
+    if (!localConfig.value.userDataDir) {
+      const homeDir = await window.electronAPI.invoke('get:home-dir')
+      localConfig.value.userDataDir = `${homeDir}\\AppData\\Roaming\\HongYan`
     }
     
     // 加载网段配置
@@ -140,7 +214,9 @@ async function saveConfig() {
   await window.electronAPI.invoke('config:set', {
     peerId: configStore.peerId,
     nickname: localConfig.value.nickname,
-    avatar: localConfig.value.avatar
+    avatar: localConfig.value.avatar,
+    userDataDir: localConfig.value.userDataDir,
+    downloadPath: localConfig.value.downloadPath
   })
   configStore.nickname = localConfig.value.nickname
   configStore.avatar = localConfig.value.avatar
@@ -173,6 +249,47 @@ async function copyPeerId() {
     // 可以添加toast提示
   } catch (err) {
     console.error('Failed to copy:', err)
+  }
+}
+
+async function selectDownloadPath() {
+  try {
+    const dirPath = await window.electronAPI.invoke('dialog:select-directory', '选择默认下载路径') as string | undefined
+    if (dirPath) {
+      localConfig.value.downloadPath = dirPath
+    }
+  } catch (err) {
+    console.error('Failed to select directory:', err)
+  }
+}
+
+async function selectUserDataDir() {
+  try {
+    const dirPath = await window.electronAPI.invoke('dialog:select-directory', '选择数据存储目录') as string | undefined
+    if (dirPath) {
+      localConfig.value.userDataDir = dirPath
+    }
+  } catch (err) {
+    console.error('Failed to select directory:', err)
+  }
+}
+
+async function saveStorageConfig() {
+  try {
+    const config = await window.electronAPI.invoke('config:get')
+    const newConfig = {
+      ...config,
+      userDataDir: localConfig.value.userDataDir,
+      downloadPath: localConfig.value.downloadPath
+    }
+    await window.electronAPI.invoke('config:set', newConfig)
+    // 更新 configStore 使设置立即生效
+    configStore.downloadPath = localConfig.value.downloadPath
+    configStore.userDataDir = localConfig.value.userDataDir
+    alert('路径设置已保存')
+  } catch (err) {
+    console.error('Failed to save storage config:', err)
+    alert('保存失败')
   }
 }
 
@@ -256,8 +373,8 @@ function getInitials(name: string): string {
   transform: translate(-50%, -50%);
   background: #fff;
   border-radius: 12px;
-  width: 480px;
-  max-height: 80vh;
+  width: 520px;
+  max-height: 85vh;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
@@ -316,7 +433,7 @@ function getInitials(name: string): string {
 }
 
 .settings-section {
-  margin-bottom: 24px;
+  margin-bottom: 28px;
 }
 
 .settings-section:last-child {
@@ -443,6 +560,76 @@ function getInitials(name: string): string {
 .copy-btn:hover {
   background: #e8e8e8;
   color: #333;
+}
+
+/* 路径设置 */
+.path-setting {
+  margin-bottom: 20px;
+}
+
+.path-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.path-label-row label {
+  margin-bottom: 0;
+}
+
+.path-hint {
+  font-size: 11px;
+  color: #999;
+}
+
+.path-hint.warning {
+  color: #fa8c16;
+}
+
+.path-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.path-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #fafafa;
+  color: #666;
+  cursor: pointer;
+}
+
+.path-input:focus {
+  border-color: #07c160;
+  background: #fff;
+}
+
+.browse-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  background: #fff;
+  color: #666;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.browse-btn:hover {
+  border-color: #07c160;
+  color: #07c160;
+}
+
+.setting-actions {
+  margin-top: 16px;
 }
 
 /* 关于信息 */

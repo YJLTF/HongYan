@@ -103,37 +103,12 @@
       </div>
     </div>
 
-    <!-- 网段扫描配置对话框 -->
-    <div v-if="showScanConfig" class="modal-overlay" @click.self="closeScanConfig">
-      <div class="scan-config-dialog">
-        <div class="dialog-header">
-          <h3>网段扫描配置</h3>
-          <button class="close-btn" @click="closeScanConfig">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="18" y1="6" x2="6" y2="18"/>
-              <line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-          </button>
-        </div>
-        <div class="dialog-body">
-          <div class="config-info">
-            <p class="info-text">配置需要扫描的网段，系统会自动扫描当前所在网段</p>
-          </div>
-          <div class="segment-input">
-            <label>额外扫描网段（每行一个，支持 CIDR 格式）</label>
-            <textarea 
-              v-model="scanSegmentsText" 
-              placeholder="例如：&#10;192.168.1.0/24&#10;192.168.31.0/24&#10;10.0.0.0/24"
-              rows="5"
-              maxlength="500"
-            ></textarea>
-          </div>
-        </div>
-        <div class="dialog-footer">
-          <button class="btn-cancel" @click="closeScanConfig">取消</button>
-          <button class="btn-save" @click="saveAndScan">保存并刷新</button>
-        </div>
-      </div>
+    <!-- 网段扫描配置面板 -->
+    <div v-if="showScanConfig" class="modal-overlay" @click.self="showScanConfig = false">
+      <ScanConfigPanel 
+        @close="showScanConfig = false"
+        @refreshed="handleFriendsRefreshed"
+      />
     </div>
 
     <!-- 好友备注编辑对话框 -->
@@ -179,9 +154,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref } from 'vue'
 import { useFriendStore } from '../stores/friend-store'
 import { useChatStore } from '../stores/chat-store'
+import ScanConfigPanel from './ScanConfigPanel.vue'
 import type { Friend } from '@shared/types'
 
 const emit = defineEmits(['openChat'])
@@ -193,8 +169,6 @@ const showScanConfig = ref(false)
 const showRemarkDialog = ref(false)
 const selectedFriend = ref<Friend | null>(null)
 const editingRemark = ref('')
-const scanSegmentsText = ref('')
-const isRefreshing = ref(false)
 
 const friends = computed(() => friendStore.friends)
 
@@ -215,18 +189,6 @@ const onlineFriends = computed(() =>
 const offlineFriends = computed(() => 
   filteredFriends.value.filter(f => !f.online)
 )
-
-// 加载网段配置
-onMounted(async () => {
-  try {
-    const config = await window.electronAPI.invoke('config:get')
-    if (config?.scanSegments && Array.isArray(config.scanSegments)) {
-      scanSegmentsText.value = config.scanSegments.join('\n')
-    }
-  } catch (err) {
-    console.error('Failed to load scan config:', err)
-  }
-})
 
 function getInitials(name: string): string {
   if (!name) return '?'
@@ -282,46 +244,8 @@ async function saveRemark() {
   }
 }
 
-function closeScanConfig() {
-  showScanConfig.value = false
-}
-
-async function saveAndScan() {
-  isRefreshing.value = true
-  try {
-    // 解析网段文本
-    const segments = scanSegmentsText.value
-      .split('\n')
-      .map(s => s.trim())
-      .filter(s => s.length > 0)
-
-    // 保存到配置
-    const config = await window.electronAPI.invoke('config:get')
-    await window.electronAPI.invoke('config:set', {
-      ...config,
-      scanSegments: segments
-    })
-
-    // 触发扫描
-    await window.electronAPI.invoke('friend:scan')
-    
-    // 等待扫描完成
-    await new Promise(resolve => setTimeout(resolve, 2000))
-    
-    // 重新加载好友列表
-    const loadedFriends = await window.electronAPI.invoke('friend:list')
-    if (Array.isArray(loadedFriends)) {
-      friendStore.updateFriends(loadedFriends)
-    }
-
-    closeScanConfig()
-    alert('刷新完成')
-  } catch (err) {
-    console.error('Failed to save and scan:', err)
-    alert('操作失败')
-  } finally {
-    isRefreshing.value = false
-  }
+function handleFriendsRefreshed(friends: any[]) {
+  friendStore.updateFriends(friends)
 }
 
 function startChat(friend: Friend) {
@@ -335,6 +259,8 @@ function startChat(friend: Friend) {
   flex: 1;
   display: flex;
   flex-direction: column;
+  width: 100%;
+  min-width: 0;
   background: #f5f5f5;
 }
 
@@ -599,7 +525,6 @@ function startChat(friend: Friend) {
   z-index: 1000;
 }
 
-.scan-config-dialog,
 .remark-dialog {
   background: #fff;
   border-radius: 12px;
@@ -647,31 +572,18 @@ function startChat(friend: Friend) {
   padding: 20px;
 }
 
-.config-info {
-  margin-bottom: 16px;
-}
-
-.info-text {
-  font-size: 13px;
-  color: #666;
-  margin: 0;
-}
-
-.segment-input,
 .remark-input {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.segment-input label,
 .remark-input label {
   font-size: 13px;
   font-weight: 500;
   color: #666;
 }
 
-.segment-input textarea,
 .remark-input input {
   padding: 10px 12px;
   border: 1px solid #d9d9d9;
@@ -682,7 +594,6 @@ function startChat(friend: Friend) {
   font-family: 'Consolas', 'Monaco', monospace;
 }
 
-.segment-input textarea:focus,
 .remark-input input:focus {
   border-color: #07c160;
 }

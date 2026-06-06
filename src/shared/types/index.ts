@@ -73,6 +73,7 @@ export interface ChatRecord {
   fileSize?: number
   status: MessageStatus
   timestamp: number
+  recalled?: boolean
 }
 
 export interface FileTransferRecord {
@@ -94,6 +95,8 @@ export interface AppConfig {
   avatar?: string
   defaultSegment?: string
   scanSegments?: string[] // 需要扫描的网段列表
+  userDataDir?: string   // 自定义数据目录（需要重启应用生效）
+  downloadPath?: string   // 默认下载路径
 }
 
 export interface EncryptedData {

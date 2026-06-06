@@ -28,6 +28,9 @@ exports.default = async function afterPack(context) {
   args.push('--set-file-version', appInfo.version);
   args.push('--set-product-version', appInfo.version + '.0');
 
+  const iconPath = path.join(__dirname, '..', 'build', 'icons', 'icon.ico');
+  args.push('--set-icon', iconPath);
+
   return new Promise((resolve) => {
     execFile(rcedit, args, (err) => {
       if (err) console.warn('rcedit skipped:', err.message);

@@ -5,8 +5,15 @@ import type { FileTransferRecord } from '@shared/types'
 export const useTransferStore = defineStore('transfer', () => {
   const transfers = ref<FileTransferRecord[]>([])
 
+  function setTransfers(records: FileTransferRecord[]) {
+    transfers.value = records
+  }
+
   function addTransfer(record: FileTransferRecord) {
-    transfers.value.push(record)
+    const existing = transfers.value.find(t => t.transferId === record.transferId)
+    if (!existing) {
+      transfers.value.push(record)
+    }
   }
 
   function updateProgress(transferId: string, progress: number) {
@@ -23,5 +30,12 @@ export const useTransferStore = defineStore('transfer', () => {
     }
   }
 
-  return { transfers, addTransfer, updateProgress, updateStatus }
+  function updateSavePath(transferId: string, savePath: string) {
+    const t = transfers.value.find((t) => t.transferId === transferId)
+    if (t) {
+      t.savePath = savePath
+    }
+  }
+
+  return { transfers, setTransfers, addTransfer, updateProgress, updateStatus, updateSavePath }
 })

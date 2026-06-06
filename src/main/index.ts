@@ -12,8 +12,9 @@ import { setPacketHandler, sendToPeer } from './network/connection-manager'
 import { hasPendingNegotiation } from './crypto/key-negotiation'
 import { createPacket } from './network/protocol'
 import { registerIpcHandlers } from './ipc/ipc-handlers'
-import { setMainWindow, pushFriendOnline, pushFriendOffline, pushMessageReceived } from './ipc/ipc-push'
-import type { AppConfig, ProtocolPacket } from '@shared/types'
+import { setMainWindow, pushFriendOnline, pushFriendOffline, pushMessageReceived, pushFileTransferRequest } from './ipc/ipc-push'
+import type { AppConfig, ProtocolPacket, ChatRecord, FileTransferRecord } from '@shared/types'
+import { MessageType, MessageStatus, FileTransferStatus } from '@shared/types'
 import crypto from 'crypto'
 
 log.transports.file.level = 'info'
@@ -28,7 +29,13 @@ function createWindow(): void {
     minWidth: 700,
     minHeight: 500,
     title: '鸿雁',
-    icon: path.join(__dirname, '../renderer/assets/icon/icon-256x256.png'),
+    icon: path.join(
+      __dirname,
+      process.env.VITE_DEV_SERVER_URL
+        ? '../../src/renderer/public/icons/icon-256x256.png'
+        : '../renderer/icons/icon-256x256.png'
+    ),
+    frame: true,
 
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.mjs'),
@@ -56,31 +63,6 @@ function createWindow(): void {
 function setupApplicationMenu(): void {
   const template: Electron.MenuItemConstructorOptions[] = [
     {
-      label: '鸿雁',
-      submenu: [
-        { label: '关于鸿雁', role: 'about' },
-        { type: 'separator' },
-        { label: '隐藏鸿雁', role: 'hide' },
-        { label: '隐藏其他', role: 'hideOthers' },
-        { label: '显示全部', role: 'unhide' },
-        { type: 'separator' },
-        { label: '退出鸿雁', role: 'quit' },
-      ],
-    },
-    {
-      label: '编辑',
-      submenu: [
-        { label: '撤销', role: 'undo' },
-        { label: '重做', role: 'redo' },
-        { type: 'separator' },
-        { label: '剪切', role: 'cut' },
-        { label: '复制', role: 'copy' },
-        { label: '粘贴', role: 'paste' },
-        { label: '删除', role: 'delete' },
-        { label: '全选', role: 'selectAll' },
-      ],
-    },
-    {
       label: '视图',
       submenu: [
         { label: '重新加载', role: 'reload' },
@@ -100,19 +82,7 @@ function setupApplicationMenu(): void {
         { label: '最小化', role: 'minimize' },
         { label: '关闭', role: 'close' },
       ],
-    },
-    {
-      label: '帮助',
-      submenu: [
-        {
-          label: '鸿雁官网',
-          click: async () => {
-            const { shell } = require('electron')
-            await shell.openExternal('https://github.com')
-          },
-        },
-      ],
-    },
+    }
   ]
 
   const menu = Menu.buildFromTemplate(template)
@@ -122,7 +92,7 @@ function setupApplicationMenu(): void {
 async function initApp(): Promise<void> {
   log.info('Initializing HongYan...')
 
-  const db = initDatabase()
+  await initDatabase()
   log.info('Database initialized')
 
   let config = storageService.loadConfig()
@@ -164,7 +134,7 @@ function handleIncomingPacket(packet: ProtocolPacket, peerIp: string): void {
         break
       }
       case 'message': {
-        const data = packet.data
+        const data = packet.data as any
         // 检查是否是特殊类型的消息（撤回、已读回执等）
         if (data.encrypted) {
           try {
@@ -199,23 +169,59 @@ function handleIncomingPacket(packet: ProtocolPacket, peerIp: string): void {
         break
       }
       case 'ack': {
-        messageService.handleAck(packet.data, extractPeerId(packet))
+        messageService.handleAck(packet.data as any, extractPeerId(packet))
         break
       }
       case 'file-request': {
-        pushMessageReceived({ type: 'file-request', data: packet.data })
+        try {
+          const peerId = extractPeerId(packet)
+          log.info('Received file request from peer:', peerId)
+          const decrypted = cryptoService.decryptFromTransmission(peerId, (packet.data as any).encrypted)
+          const fileRequest = JSON.parse(decrypted)
+          log.info('File request decrypted:', fileRequest.fileName, fileRequest.fileSize)
+
+          const fileTransferRecord: FileTransferRecord = {
+            transferId: fileRequest.transferId,
+            peerId,
+            direction: 'receive',
+            fileName: fileRequest.fileName,
+            fileSize: fileRequest.fileSize,
+            status: FileTransferStatus.PENDING,
+            progress: 0,
+            md5: fileRequest.md5,
+            timestamp: Date.now(),
+          }
+          storageService.saveFileTransfer(fileTransferRecord)
+
+          const chatRecord: ChatRecord = {
+            id: fileRequest.transferId,
+            peerId,
+            type: MessageType.FILE,
+            direction: 'received',
+            content: '',
+            fileName: fileRequest.fileName,
+            fileSize: fileRequest.fileSize,
+            status: MessageStatus.DELIVERED,
+            timestamp: Date.now(),
+          }
+          storageService.saveChatRecord(chatRecord)
+          pushMessageReceived(chatRecord)
+          pushFileTransferRequest(fileRequest)
+        } catch (err) {
+          log.error('Failed to handle file request:', err)
+        }
         break
       }
       case 'file-accept': {
-        fileTransferService.handleFileAccept(packet.data, extractPeerId(packet))
+        fileTransferService.handleFileAccept(packet.data as any, extractPeerId(packet))
         break
       }
       case 'file-chunk': {
-        fileTransferService.handleFileChunk(packet.data, extractPeerId(packet))
+        fileTransferService.handleFileChunk(packet.data as any, extractPeerId(packet))
         break
       }
       case 'file-complete': {
-        fileTransferService.handleFileComplete(packet.data, extractPeerId(packet))
+        fileTransferService.handleFileComplete(packet.data as any, extractPeerId(packet))
         break
       }
       default:
@@ -234,7 +240,7 @@ async function handleKeyNegotiation(packet: ProtocolPacket, peerIp: string): Pro
   const fromPeerId = extractPeerId(packet)
   if (!fromPeerId) return
 
-  const data = packet.data
+  const data = packet.data as any
   if (!data.publicKey) return
 
   if (hasPendingNegotiation(fromPeerId)) {

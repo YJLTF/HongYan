@@ -78,6 +78,9 @@
             :record="msg"
             :showAvatar="shouldShowAvatar(index)"
             @viewImage="(c: string) => emit('viewImage', c)"
+            @acceptFile="handleAcceptFile"
+            @saveAsFile="handleSaveAsFile"
+            @rejectFile="handleRejectFile"
           />
         </template>
         
@@ -211,6 +214,8 @@
 import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useChatStore } from '../stores/chat-store'
 import { useFriendStore } from '../stores/friend-store'
+import { useTransferStore } from '../stores/transfer-store'
+import { useConfigStore } from '../stores/config-store'
 import MessageBubble from './MessageBubble.vue'
 import MessageInput from './MessageInput.vue'
 import type { ChatRecord } from '@shared/types'
@@ -219,6 +224,8 @@ const emit = defineEmits(['sendText', 'sendImage', 'sendFile', 'viewImage', 'ope
 
 const chatStore = useChatStore()
 const friendStore = useFriendStore()
+const transferStore = useTransferStore()
+const configStore = useConfigStore()
 const messagesContainer = ref<HTMLElement | null>(null)
 const showMoreMenu = ref(false)
 const moreBtnRef = ref<HTMLElement | null>(null)
@@ -413,6 +420,45 @@ function formatLastSeen(timestamp?: number): string {
   return `${date.getMonth() + 1}月${date.getDate()}日在线`
 }
 
+async function handleAcceptFile(record: any) {
+  try {
+    // 获取配置的下载路径，如果没有配置则使用默认的 Downloads 目录
+    let downloadDir = configStore.downloadPath
+    if (!downloadDir) {
+      const homeDir = await window.electronAPI.invoke('get:home-dir')
+      downloadDir = `${homeDir}\\Downloads`
+    }
+    const defaultPath = `${downloadDir}\\${record.fileName}`
+    await window.electronAPI.invoke('file:accept', record.id, defaultPath)
+    transferStore.updateStatus(record.id, 'accepted')
+    transferStore.updateSavePath(record.id, defaultPath)
+  } catch (err) {
+    console.error('Failed to accept file:', err)
+  }
+}
+
+async function handleSaveAsFile(record: any) {
+  try {
+    const result = await window.electronAPI.invoke('file:select-save-path', record.fileName)
+    if (result && !result.canceled) {
+      await window.electronAPI.invoke('file:accept', record.id, result.filePath)
+      transferStore.updateStatus(record.id, 'accepted')
+      transferStore.updateSavePath(record.id, result.filePath)
+    }
+  } catch (err) {
+    console.error('Failed to select save path:', err)
+  }
+}
+
+async function handleRejectFile(record: any) {
+  try {
+    await window.electronAPI.invoke('file:reject', record.id)
+    transferStore.updateStatus(record.id, 'rejected')
+  } catch (err) {
+    console.error('Failed to reject file:', err)
+  }
+}
+
 // 自动滚动到底部
 watch(messages, () => {
   nextTick(() => {
@@ -428,7 +474,9 @@ watch(messages, () => {
   flex: 1;
   display: flex;
   flex-direction: column;
+  width: 100%;
   height: 100%;
+  min-width: 0;
   background: #f5f5f5;
 }
 
@@ -441,6 +489,7 @@ watch(messages, () => {
   background: #fff;
   border-bottom: 1px solid #e8e8e8;
   flex-shrink: 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 
 .header-left {
@@ -455,10 +504,11 @@ watch(messages, () => {
 
 .avatar,
 .avatar-placeholder {
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
   object-fit: cover;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 .avatar-placeholder {
@@ -467,23 +517,37 @@ watch(messages, () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
 }
 
 .status-dot {
   position: absolute;
-  bottom: 0;
-  right: 0;
-  width: 10px;
-  height: 10px;
+  bottom: -2px;
+  right: -2px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: #ccc;
   border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  transition: all 0.3s ease;
 }
 
 .status-dot.online {
   background: #07c160;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.1);
+  }
 }
 
 .friend-info {
@@ -512,52 +576,56 @@ watch(messages, () => {
 .header-actions {
   display: flex;
   gap: 8px;
+  position: relative;
 }
 
 .action-btn {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border: none;
-  border-radius: 6px;
+  border-radius: 10px;
   background: transparent;
   color: #666;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .action-btn:hover {
   background: #f5f5f5;
-  color: #333;
+  color: #07c160;
+  transform: scale(1.05);
 }
 
 /* 消息容器 */
 .messages-container {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 16px 0;
 }
 
 .messages-list {
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 0 20px;
+  width: 100%;
+  padding: 0 24px;
+  box-sizing: border-box;
 }
 
 .time-divider {
   text-align: center;
-  margin: 16px 0;
+  margin: 20px 0;
 }
 
 .time-divider span {
   display: inline-block;
-  padding: 4px 12px;
+  padding: 6px 16px;
   background: rgba(0, 0, 0, 0.05);
-  border-radius: 12px;
+  border-radius: 20px;
   font-size: 12px;
   color: #999;
+  backdrop-filter: blur(10px);
 }
 
 .empty-chat {
@@ -593,6 +661,7 @@ watch(messages, () => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  width: 100%;
   background: #f5f5f5;
   color: #999;
 }
@@ -626,28 +695,37 @@ watch(messages, () => {
 .messages-container::-webkit-scrollbar-thumb {
   background: #ddd;
   border-radius: 3px;
+  transition: background 0.2s;
 }
 
 .messages-container::-webkit-scrollbar-thumb:hover {
-  background: #ccc;
+  background: #bbb;
 }
 
 /* 更多菜单 */
-.header-actions {
-  position: relative;
-}
-
 .more-menu {
   position: absolute;
   top: 100%;
   right: 0;
   margin-top: 8px;
   background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  padding: 4px;
-  min-width: 160px;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  padding: 6px;
+  min-width: 170px;
   z-index: 100;
+  animation: slideDown 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .menu-item {
@@ -658,12 +736,13 @@ watch(messages, () => {
   font-size: 14px;
   color: #333;
   cursor: pointer;
-  border-radius: 4px;
-  transition: background 0.2s;
+  border-radius: 8px;
+  transition: all 0.2s ease;
 }
 
 .menu-item:hover {
   background: #f5f5f5;
+  transform: translateX(2px);
 }
 
 .menu-item.danger {
@@ -686,23 +765,47 @@ watch(messages, () => {
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .friend-info-dialog {
   background: #fff;
-  border-radius: 12px;
+  border-radius: 16px;
   width: 90%;
   max-width: 480px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
   overflow: hidden;
+  animation: scaleIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .dialog-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid #e8e8e8;
+  padding: 18px 24px;
+  border-bottom: 1px solid #f0f0f0;
+  background: linear-gradient(180deg, #fafafa 0%, #fff 100%);
 }
 
 .dialog-header h3 {
@@ -713,38 +816,40 @@ watch(messages, () => {
 }
 
 .close-btn {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border: none;
-  border-radius: 6px;
+  border-radius: 10px;
   background: transparent;
   color: #666;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .close-btn:hover {
   background: #f5f5f5;
   color: #333;
+  transform: rotate(90deg);
 }
 
 .dialog-body {
-  padding: 24px 20px;
+  padding: 28px 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 20px;
+  gap: 24px;
 }
 
 .friend-avatar-large img,
 .avatar-placeholder-large {
-  width: 100px;
-  height: 100px;
-  border-radius: 12px;
+  width: 110px;
+  height: 110px;
+  border-radius: 16px;
   object-fit: cover;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
 }
 
 .avatar-placeholder-large {
@@ -753,7 +858,7 @@ watch(messages, () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 32px;
+  font-size: 36px;
   font-weight: 600;
 }
 
@@ -767,8 +872,16 @@ watch(messages, () => {
 .detail-item {
   display: flex;
   align-items: center;
-  padding: 10px 0;
-  border-bottom: 1px solid #f0f0f0;
+  padding: 12px 0;
+  border-bottom: 1px solid #f5f5f5;
+  transition: background 0.2s;
+}
+
+.detail-item:hover {
+  background: rgba(0, 0, 0, 0.02);
+  margin: 0 -10px;
+  padding: 12px 10px;
+  border-radius: 8px;
 }
 
 .detail-item:last-child {
@@ -780,6 +893,7 @@ watch(messages, () => {
   font-size: 14px;
   color: #999;
   flex-shrink: 0;
+  font-weight: 500;
 }
 
 .detail-item .value {
@@ -787,6 +901,7 @@ watch(messages, () => {
   font-size: 14px;
   color: #333;
   text-align: right;
+  font-weight: 500;
 }
 
 .detail-item .value.online {
@@ -794,54 +909,63 @@ watch(messages, () => {
 }
 
 .dialog-footer {
-  padding: 16px 20px;
-  border-top: 1px solid #e8e8e8;
+  padding: 18px 24px;
+  border-top: 1px solid #f0f0f0;
   display: flex;
   justify-content: center;
+  background: linear-gradient(0deg, #fafafa 0%, #fff 100%);
 }
 
 .btn-primary {
-  padding: 10px 24px;
+  padding: 12px 32px;
   border: none;
-  border-radius: 6px;
-  background: #07c160;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #07c160 0%, #06ad56 100%);
   color: white;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 12px rgba(7, 193, 96, 0.3);
 }
 
 .btn-primary:hover {
-  background: #06ad56;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(7, 193, 96, 0.4);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
 }
 
 /* 备注对话框 */
 .remark-dialog {
   background: #fff;
-  border-radius: 12px;
+  border-radius: 16px;
   width: 90%;
-  max-width: 400px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  max-width: 420px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
   overflow: hidden;
+  animation: scaleIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .friend-preview {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 16px;
-  background: #f5f5f5;
-  border-radius: 8px;
-  margin-bottom: 16px;
+  padding: 18px;
+  background: linear-gradient(135deg, #f5f7fa 0%, #fafbfc 100%);
+  border-radius: 12px;
+  margin-bottom: 20px;
 }
 
 .preview-avatar img,
 .preview-avatar .avatar-placeholder {
-  width: 50px;
-  height: 50px;
-  border-radius: 8px;
+  width: 54px;
+  height: 54px;
+  border-radius: 12px;
   object-fit: cover;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
 .preview-avatar .avatar-placeholder {
@@ -850,7 +974,7 @@ watch(messages, () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 600;
 }
 
@@ -874,40 +998,43 @@ watch(messages, () => {
   display: block;
   font-size: 13px;
   color: #333;
-  margin-bottom: 8px;
-  font-weight: 500;
+  margin-bottom: 10px;
+  font-weight: 600;
 }
 
 .remark-input input {
   width: 100%;
-  padding: 10px;
-  border: 1px solid #d9d9d9;
-  border-radius: 6px;
+  padding: 12px 16px;
+  border: 2px solid #e8e8e8;
+  border-radius: 10px;
   font-size: 14px;
   outline: none;
-  transition: border-color 0.2s;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-sizing: border-box;
 }
 
 .remark-input input:focus {
   border-color: #07c160;
+  box-shadow: 0 0 0 4px rgba(7, 193, 96, 0.1);
 }
 
 .dialog-footer {
-  padding: 12px 20px;
-  border-top: 1px solid #e8e8e8;
+  padding: 16px 20px;
+  border-top: 1px solid #f0f0f0;
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 12px;
 }
 
 .btn-cancel,
 .btn-save {
-  padding: 8px 16px;
+  padding: 10px 20px;
   border: none;
-  border-radius: 6px;
-  font-size: 13px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .btn-cancel {
@@ -917,14 +1044,17 @@ watch(messages, () => {
 
 .btn-cancel:hover {
   background: #e8e8e8;
+  transform: translateY(-1px);
 }
 
 .btn-save {
-  background: #07c160;
+  background: linear-gradient(135deg, #07c160 0%, #06ad56 100%);
   color: white;
+  box-shadow: 0 4px 12px rgba(7, 193, 96, 0.3);
 }
 
 .btn-save:hover {
-  background: #06ad56;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(7, 193, 96, 0.4);
 }
 </style>

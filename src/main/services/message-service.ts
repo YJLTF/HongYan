@@ -209,7 +209,7 @@ class MessageService implements IMessageService {
 
     // 更新本地数据库
     for (const messageId of messageIds) {
-      storageService.updateMessageStatus(messageId, 'read')
+      storageService.updateMessageStatus(messageId, MessageStatus.READ)
     }
 
     // 发送已读回执给对方
@@ -256,12 +256,68 @@ class MessageService implements IMessageService {
       if (receiptData.type === 'read-receipt' && Array.isArray(receiptData.messageIds)) {
         // 更新本地数据库中对应消息的状态为已读
         for (const messageId of receiptData.messageIds) {
-          storageService.updateMessageStatus(messageId, 'read')
+          storageService.updateMessageStatus(messageId, MessageStatus.READ)
         }
         log.info(`Received read receipt for ${receiptData.messageIds.length} messages from ${peerId}`)
       }
     } catch (err) {
       log.warn('Failed to handle read receipt:', err)
+    }
+  }
+
+  // 处理撤回消息
+  handleRecallMessage(data: any, fromPeerId: string): void {
+    try {
+      const peerId = data.fromPeerId || fromPeerId
+      const encrypted = data.encrypted || data
+      const decrypted = cryptoService.decryptFromTransmission(peerId, encrypted)
+      const recallData = JSON.parse(decrypted)
+
+      if (recallData.type === 'recall' && recallData.messageId) {
+        const messageId = recallData.messageId
+        const records = storageService.queryChatRecords(peerId, 1000, 0)
+        const record = records.find(r => r.id === messageId)
+        if (record) {
+          record.recalled = true
+          storageService.saveChatRecord(record)
+          log.info(`Recalled message ${messageId} from ${peerId}`)
+        }
+      }
+    } catch (err) {
+      log.warn('Failed to handle recall message:', err)
+    }
+  }
+
+  // 撤回消息
+  async recallMessage(peerId: string, messageId: string): Promise<void> {
+    await this.ensureSessionKey(peerId)
+
+    const selfPeerId = storageService.loadConfig()?.peerId || ''
+    const timestamp = Date.now()
+
+    const recallPacket = {
+      version: PROTOCOL_VERSION,
+      type: 'recall',
+      fromPeerId: selfPeerId,
+      toPeerId: peerId,
+      messageId,
+      timestamp,
+    }
+
+    const encrypted = cryptoService.encryptForTransmission(peerId, JSON.stringify(recallPacket))
+    const packet = createPacket('message', { fromPeerId: selfPeerId, encrypted })
+
+    const friend = udpBroadcaster.getFriend(peerId)
+    if (friend && friend.online) {
+      await sendToPeer(friend, packet)
+    }
+
+    // 更新本地消息状态
+    const records = storageService.queryChatRecords(peerId, 1000, 0)
+    const record = records.find(r => r.id === messageId)
+    if (record) {
+      record.recalled = true
+      storageService.saveChatRecord(record)
     }
   }
 }

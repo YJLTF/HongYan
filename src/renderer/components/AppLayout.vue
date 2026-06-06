@@ -34,8 +34,9 @@
         </button>
         <button 
           class="nav-item" 
+          :class="{ active: currentView === 'transfers' }"
           title="文件传输"
-          @click="showTransfers = true"
+          @click="currentView = 'transfers'"
         >
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
@@ -95,11 +96,11 @@
         v-else-if="currentView === 'contacts'"
         @openChat="switchToChat"
       />
+      <FileTransferView v-else-if="currentView === 'transfers'" />
     </main>
 
     <!-- 模态框 -->
     <SettingsView :visible="showSettings" @close="showSettings = false" />
-    <FileTransferProgress :visible="showTransfers" @close="showTransfers = false" />
     <ImageViewer 
       :visible="showImageViewer" 
       :imageData="currentImageData" 
@@ -109,37 +110,12 @@
     <!-- 通知提示 -->
     <NotificationToast ref="notificationRef" />
 
-    <!-- 网段扫描配置对话框 -->
-    <div v-if="showScanConfig" class="modal-overlay" @click.self="closeScanConfig">
-      <div class="scan-config-dialog">
-        <div class="dialog-header">
-          <h3>网段扫描配置</h3>
-          <button class="close-btn" @click="closeScanConfig">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="18" y1="6" x2="6" y2="18"/>
-              <line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-          </button>
-        </div>
-        <div class="dialog-body">
-          <div class="config-info">
-            <p class="info-text">配置需要扫描的网段，系统会自动扫描当前所在网段</p>
-          </div>
-          <div class="segment-input">
-            <label>额外扫描网段（每行一个，支持 CIDR 格式）</label>
-            <textarea 
-              v-model="scanSegmentsText" 
-              placeholder="例如：&#10;192.168.1.0/24&#10;192.168.31.0/24&#10;10.0.0.0/24"
-              rows="5"
-              maxlength="500"
-            ></textarea>
-          </div>
-        </div>
-        <div class="dialog-footer">
-          <button class="btn-cancel" @click="closeScanConfig">取消</button>
-          <button class="btn-save" @click="saveAndScan">保存并刷新</button>
-        </div>
-      </div>
+    <!-- 网段扫描配置面板 -->
+    <div v-if="showScanConfig" class="modal-overlay" @click.self="showScanConfig = false">
+      <ScanConfigPanel 
+        @close="showScanConfig = false"
+        @refreshed="handleFriendsRefreshed"
+      />
     </div>
   </div>
 </template>
@@ -154,9 +130,10 @@ import FriendList from './FriendList.vue'
 import ChatView from './ChatView.vue'
 import ContactsView from './ContactsView.vue'
 import SettingsView from './SettingsView.vue'
-import FileTransferProgress from './FileTransferProgress.vue'
+import FileTransferView from './FileTransferView.vue'
 import ImageViewer from './ImageViewer.vue'
 import NotificationToast from './NotificationToast.vue'
+import ScanConfigPanel from './ScanConfigPanel.vue'
 
 const friendStore = useFriendStore()
 const chatStore = useChatStore()
@@ -165,14 +142,12 @@ const configStore = useConfigStore()
 
 const notificationRef = ref<any>(null)
 
-const currentView = ref<'chat' | 'contacts'>('chat')
+const currentView = ref<'chat' | 'contacts' | 'transfers'>('chat')
 const showSettings = ref(false)
-const showTransfers = ref(false)
 const showImageViewer = ref(false)
 const showScanConfig = ref(false)
 const currentImageData = ref('')
 const searchQuery = ref('')
-const scanSegmentsText = ref('')
 
 const cleanups: (() => void)[] = []
 
@@ -195,11 +170,14 @@ onMounted(async () => {
   const config = await window.electronAPI.invoke('config:get')
   if (config) {
     configStore.setConfig(config)
-    // 加载网段配置
-    if (config.scanSegments && Array.isArray(config.scanSegments)) {
-      scanSegmentsText.value = config.scanSegments.join('\n')
-    }
   }
+
+  try {
+    const transfers = await window.electronAPI.invoke('file:list-transfers')
+    if (Array.isArray(transfers)) {
+      transferStore.setTransfers(transfers)
+    }
+  } catch (_) {}
 
   cleanups.push(
     window.electronAPI.on('friend:online', (friend: any) => {
@@ -233,7 +211,6 @@ onMounted(async () => {
   cleanups.push(
     window.electronAPI.on('file:transfer-request', (req: any) => {
       transferStore.addTransfer(req)
-      showTransfers.value = true
     })
   )
   cleanups.push(
@@ -298,8 +275,13 @@ async function handleSendImage(filePath: string) {
 async function handleSendFile(filePath: string) {
   const peerId = chatStore.currentPeerId
   if (!peerId) return
-  await window.electronAPI.invoke('file:send', peerId, filePath)
-  showTransfers.value = true
+  const result = await window.electronAPI.invoke('file:send', peerId, filePath)
+  if (result?.error) {
+    alert(result.error)
+  } else {
+    const records = await window.electronAPI.invoke('chat:load-history', peerId)
+    chatStore.setMessages(peerId, records || [])
+  }
 }
 
 function handleViewImage(imageData: string) {
@@ -315,43 +297,8 @@ function switchToContacts() {
   currentView.value = 'contacts'
 }
 
-function closeScanConfig() {
-  showScanConfig.value = false
-}
-
-async function saveAndScan() {
-  try {
-    // 解析网段文本
-    const segments = scanSegmentsText.value
-      .split('\n')
-      .map(s => s.trim())
-      .filter(s => s.length > 0)
-
-    // 保存到配置
-    const config = await window.electronAPI.invoke('config:get')
-    await window.electronAPI.invoke('config:set', {
-      ...config,
-      scanSegments: segments
-    })
-
-    // 触发扫描
-    await window.electronAPI.invoke('friend:scan')
-    
-    // 等待扫描完成
-    await new Promise(resolve => setTimeout(resolve, 2000))
-    
-    // 重新加载好友列表
-    const loadedFriends = await window.electronAPI.invoke('friend:list')
-    if (Array.isArray(loadedFriends)) {
-      friendStore.updateFriends(loadedFriends)
-    }
-
-    closeScanConfig()
-    alert('刷新完成')
-  } catch (err) {
-    console.error('Failed to save and scan:', err)
-    alert('操作失败')
-  }
+function handleFriendsRefreshed(friends: any[]) {
+  friendStore.updateFriends(friends)
 }
 
 function getInitials(name: string): string {
@@ -376,12 +323,13 @@ function getInitials(name: string): string {
 /* 左侧导航栏 */
 .sidebar-nav {
   width: 60px;
-  background: #2e2e2e;
+  background: linear-gradient(180deg, #2e2e2e 0%, #1a1a1a 100%);
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 12px 0;
   flex-shrink: 0;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
 }
 
 .nav-header {
@@ -391,14 +339,16 @@ function getInitials(name: string): string {
 .user-avatar {
   width: 40px;
   height: 40px;
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
   cursor: pointer;
-  transition: transform 0.2s;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .user-avatar:hover {
-  transform: scale(1.05);
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .user-avatar img {
@@ -430,24 +380,44 @@ function getInitials(name: string): string {
   width: 40px;
   height: 40px;
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
   background: transparent;
   color: #999;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.nav-item::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 0;
+  background: #07c160;
+  border-radius: 0 4px 4px 0;
+  transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .nav-item:hover {
   background: rgba(255, 255, 255, 0.1);
   color: #fff;
+  transform: scale(1.05);
 }
 
 .nav-item.active {
   background: #07c160;
   color: #fff;
+  box-shadow: 0 4px 12px rgba(7, 193, 96, 0.4);
+}
+
+.nav-item.active::before {
+  height: 24px;
 }
 
 .nav-footer {
@@ -467,21 +437,35 @@ function getInitials(name: string): string {
 .sidebar-header {
   padding: 12px;
   border-bottom: 1px solid #e8e8e8;
+  background: linear-gradient(180deg, #fafafa 0%, #fff 100%);
 }
 
 .search-box {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 10px 14px;
   background: #f5f5f5;
-  border-radius: 6px;
+  border-radius: 10px;
   margin-bottom: 8px;
+  transition: all 0.3s ease;
+  border: 2px solid transparent;
+}
+
+.search-box:focus-within {
+  background: #fff;
+  border-color: #07c160;
+  box-shadow: 0 0 0 4px rgba(7, 193, 96, 0.1);
 }
 
 .search-box svg {
   color: #999;
   flex-shrink: 0;
+  transition: color 0.3s;
+}
+
+.search-box:focus-within svg {
+  color: #07c160;
 }
 
 .search-box input {
@@ -499,23 +483,31 @@ function getInitials(name: string): string {
 
 .scan-btn {
   width: 100%;
-  padding: 8px;
+  padding: 10px;
   border: 1px solid #d9d9d9;
-  border-radius: 6px;
+  border-radius: 10px;
   background: #fff;
   color: #666;
   cursor: pointer;
   font-size: 13px;
+  font-weight: 500;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  transition: all 0.2s;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .scan-btn:hover {
   border-color: #07c160;
   color: #07c160;
+  background: rgba(7, 193, 96, 0.05);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(7, 193, 96, 0.15);
+}
+
+.scan-btn:active {
+  transform: translateY(0);
 }
 
 /* 主内容区域 */
@@ -523,6 +515,7 @@ function getInitials(name: string): string {
   flex: 1;
   display: flex;
   min-width: 0;
+  overflow: hidden;
   background: #f5f5f5;
 }
 
@@ -556,122 +549,16 @@ function getInitials(name: string): string {
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.2s ease-out;
 }
 
-.scan-config-dialog {
-  background: #fff;
-  border-radius: 12px;
-  width: 90%;
-  max-width: 500px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-  overflow: hidden;
-}
-
-.dialog-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid #e8e8e8;
-}
-
-.dialog-header h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #333;
-}
-
-.close-btn {
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: #666;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-}
-
-.close-btn:hover {
-  background: #f5f5f5;
-  color: #333;
-}
-
-.dialog-body {
-  padding: 20px;
-}
-
-.config-info {
-  margin-bottom: 16px;
-}
-
-.info-text {
-  font-size: 13px;
-  color: #666;
-  margin: 0;
-}
-
-.segment-input label {
-  display: block;
-  font-size: 13px;
-  color: #333;
-  margin-bottom: 8px;
-  font-weight: 500;
-}
-
-.segment-input textarea {
-  width: 100%;
-  padding: 10px;
-  border: 1px solid #d9d9d9;
-  border-radius: 6px;
-  font-size: 13px;
-  font-family: 'Courier New', monospace;
-  resize: vertical;
-  outline: none;
-  transition: border-color 0.2s;
-}
-
-.segment-input textarea:focus {
-  border-color: #07c160;
-}
-
-.dialog-footer {
-  padding: 12px 20px;
-  border-top: 1px solid #e8e8e8;
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
-.btn-cancel,
-.btn-save {
-  padding: 8px 16px;
-  border: none;
-  border-radius: 6px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-cancel {
-  background: #f5f5f5;
-  color: #666;
-}
-
-.btn-cancel:hover {
-  background: #e8e8e8;
-}
-
-.btn-save {
-  background: #07c160;
-  color: white;
-}
-
-.btn-save:hover {
-  background: #06ad56;
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 </style>

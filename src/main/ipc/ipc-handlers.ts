@@ -1,4 +1,5 @@
 import { ipcMain, BrowserWindow, dialog } from 'electron'
+import os from 'os'
 import { friendDiscoveryService } from '../services/friend-discovery-service'
 import { messageService } from '../services/message-service'
 import { fileTransferService } from '../services/file-transfer-service'
@@ -103,6 +104,10 @@ export function registerIpcHandlers(): void {
     fileTransferService.rejectTransfer(transferId)
   })
 
+  ipcMain.handle('file:list-transfers', () => {
+    return storageService.queryFileTransfers()
+  })
+
   // 选择保存路径（另存为）
   ipcMain.handle('file:select-save-path', async (_event, defaultFileName: string) => {
     const result = await dialog.showSaveDialog({
@@ -131,8 +136,22 @@ export function registerIpcHandlers(): void {
     }
   })
 
+  // 选择目录
+  ipcMain.handle('dialog:select-directory', async (_event, title?: string) => {
+    const result = await dialog.showOpenDialog({
+      title: title || '选择目录',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    if (result.canceled || result.filePaths.length === 0) return undefined
+    return result.filePaths[0]
+  })
+
   ipcMain.handle('config:get', () => {
     return storageService.loadConfig()
+  })
+
+  ipcMain.handle('get:home-dir', () => {
+    return os.homedir()
   })
 
   ipcMain.handle('config:set', (_event, config: any) => {
@@ -157,15 +176,18 @@ export function registerIpcHandlers(): void {
   // 主动扫描好友
   ipcMain.handle('friend:scan', async () => {
     try {
-      // 获取配置的网段列表
       const config = storageService.loadConfig()
       const scanSegments = config?.scanSegments || []
       
-      // 如果有额外网段，触发对这些网段的扫描
       if (scanSegments.length > 0) {
         log.info(`Scanning configured segments: ${scanSegments.join(', ')}`)
-        // 这里可以添加对额外网段的扫描逻辑
-        // 目前 UDP broadcaster 会自动扫描当前网段
+        for (const cidr of scanSegments) {
+          try {
+            await friendDiscoveryService.scanSegment(cidr)
+          } catch (err) {
+            log.error(`Failed to scan segment ${cidr}:`, err)
+          }
+        }
       }
       
       return { success: true }

@@ -41,15 +41,29 @@
 
         <!-- 文件消息 -->
         <div v-else-if="record.type === 'file'" class="bubble file-bubble">
-          <div class="file-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
-              <polyline points="13 2 13 9 20 9"/>
-            </svg>
+          <div class="file-main-row">
+            <div class="file-icon">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
+                <polyline points="13 2 13 9 20 9"/>
+              </svg>
+            </div>
+            <div class="file-info">
+              <div class="file-name">{{ record.fileName }}</div>
+              <div class="file-size">{{ formatFileSize(record.fileSize) }}</div>
+            </div>
           </div>
-          <div class="file-info">
-            <div class="file-name">{{ record.fileName }}</div>
-            <div class="file-size">{{ formatFileSize(record.fileSize) }}</div>
+          <div class="file-actions" v-if="direction === 'received' && !fileDecided">
+            <button class="btn-file-accept" @click.stop="$emit('acceptFile', record)">接收</button>
+            <button class="btn-file-saveas" @click.stop="$emit('saveAsFile', record)">另存为</button>
+            <button class="btn-file-reject" @click.stop="$emit('rejectFile', record)">拒绝</button>
+          </div>
+          <div class="file-result" v-else-if="direction === 'received' && fileDecided">
+            <span class="file-result-text" :class="fileResultClass">{{ fileResultText }}</span>
+            <span class="file-save-path" v-if="fileSavePath">{{ fileSavePath }}</span>
+          </div>
+          <div class="file-result" v-else-if="direction === 'sent'">
+            <span class="file-result-text">{{ fileStatusText }}</span>
           </div>
         </div>
 
@@ -101,17 +115,69 @@ import { computed } from 'vue'
 import type { ChatRecord } from '@shared/types'
 import { useFriendStore } from '../stores/friend-store'
 import { useConfigStore } from '../stores/config-store'
+import { useTransferStore } from '../stores/transfer-store'
 
 const props = defineProps<{ 
   record: ChatRecord,
-  showAvatar?: boolean  // 是否显示头像（由父组件控制）
+  showAvatar?: boolean
 }>()
-defineEmits(['viewImage'])
+defineEmits(['viewImage', 'acceptFile', 'saveAsFile', 'rejectFile'])
 
 const friendStore = useFriendStore()
 const configStore = useConfigStore()
+const transferStore = useTransferStore()
 
 const direction = props.record.direction
+
+const fileDecided = computed(() => {
+  if (props.record.type !== 'file') return false
+  if (props.record.direction === 'sent') return true
+  const t = transferStore.transfers.find(tr => tr.transferId === props.record.id)
+  if (!t) return false
+  return ['accepted', 'rejected', 'transferring', 'completed', 'failed', 'interrupted'].includes(t.status)
+})
+
+const fileResultClass = computed(() => {
+  const t = transferStore.transfers.find(tr => tr.transferId === props.record.id)
+  if (!t) return ''
+  if (t.status === 'rejected') return 'rejected'
+  return 'accepted'
+})
+
+const fileResultText = computed(() => {
+  const t = transferStore.transfers.find(tr => tr.transferId === props.record.id)
+  if (!t) return ''
+  const map: Record<string, string> = {
+    accepted: '已接受',
+    rejected: '已拒绝',
+    transferring: '传输中',
+    completed: '已完成',
+    failed: '传输失败',
+    interrupted: '已中断'
+  }
+  return map[t.status] || t.status
+})
+
+const fileSavePath = computed(() => {
+  const t = transferStore.transfers.find(tr => tr.transferId === props.record.id)
+  return t?.savePath || ''
+})
+
+const fileStatusText = computed(() => {
+  if (props.record.type !== 'file') return ''
+  const t = transferStore.transfers.find(tr => tr.transferId === props.record.id)
+  if (!t) return '已发送'
+  const map: Record<string, string> = {
+    pending: '等待接收',
+    accepted: '对方已接受',
+    transferring: '传输中',
+    completed: '已完成',
+    failed: '失败',
+    rejected: '对方已拒绝',
+    interrupted: '已中断'
+  }
+  return map[t.status] || t.status
+})
 
 // 根据方向决定显示哪个头像和信息
 const displayAvatar = computed(() => {
@@ -181,10 +247,12 @@ function formatFileSize(bytes?: number): string {
 
 .message-item.sent {
   flex-direction: row-reverse;
+  margin-left: auto;
 }
 
 .message-item.received {
   flex-direction: row;
+  margin-right: auto;
 }
 
 /* 头像样式 */
@@ -305,19 +373,21 @@ function formatFileSize(bytes?: number): string {
 /* 文件气泡 */
 .file-bubble {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
   background: #fff;
   border: 1px solid #e8e8e8;
   border-radius: 8px;
-  cursor: pointer;
+  cursor: default;
   transition: all 0.2s;
+  min-width: 220px;
 }
 
-.file-bubble:hover {
-  border-color: #07c160;
-  box-shadow: 0 2px 8px rgba(7, 193, 96, 0.1);
+.file-main-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .file-icon {
@@ -328,8 +398,9 @@ function formatFileSize(bytes?: number): string {
 .file-info {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
+  flex: 1;
 }
 
 .file-name {
@@ -343,6 +414,81 @@ function formatFileSize(bytes?: number): string {
 .file-size {
   font-size: 12px;
   color: #999;
+}
+
+.file-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-file-accept,
+.btn-file-saveas,
+.btn-file-reject {
+  flex: 1;
+  padding: 6px 0;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.btn-file-accept {
+  background: #07c160;
+  color: #fff;
+}
+
+.btn-file-accept:hover {
+  background: #06ad56;
+}
+
+.btn-file-saveas {
+  background: #1890ff;
+  color: #fff;
+}
+
+.btn-file-saveas:hover {
+  background: #096dd9;
+}
+
+.btn-file-reject {
+  background: #f5f5f5;
+  color: #666;
+}
+
+.btn-file-reject:hover {
+  background: #ff4d4f;
+  color: #fff;
+}
+
+.file-result {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.file-result-text {
+  font-size: 13px;
+  color: #999;
+}
+
+.file-result-text.accepted {
+  color: #07c160;
+}
+
+.file-result-text.rejected {
+  color: #ff4d4f;
+}
+
+.file-save-path {
+  font-size: 12px;
+  color: #999;
+  word-break: break-all;
+  line-height: 1.4;
 }
 
 /* 撤回消息 */

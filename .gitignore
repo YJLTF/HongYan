@@ -1,6 +1,9 @@
-node_modules/
-dist/
-out/
+.arts/
+.claude/
 .codeartsdoer/
+build/
+dist/
+node_modules/
+out/
 *.log
 .env

@@ -15,11 +15,12 @@ import type {
   FileAcceptPacket,
   FileChunkPacket,
   FileCompletePacket,
+  ChatRecord,
 } from '@shared/types'
-import { FileTransferStatus, PROTOCOL_VERSION } from '@shared/types'
+import { FileTransferStatus, MessageType, MessageStatus, PROTOCOL_VERSION } from '@shared/types'
 import log from 'electron-log'
 
-const activeTransfers = new Map<string, { readStream: fs.ReadReadStream; writeStream: fs.WriteStream | null }>()
+const activeTransfers = new Map<string, { readStream: fs.ReadStream; writeStream: fs.WriteStream | null }>()
 
 class FileTransferService implements IFileTransferService {
   private selfPeerId(): string {
@@ -41,6 +42,14 @@ class FileTransferService implements IFileTransferService {
     const friend = udpBroadcaster.getFriend(peerId)
     if (!friend || !friend.online) throw new Error('Friend is not online')
 
+    if (cryptoService.needsRenegotiation(peerId)) {
+      const requestJson = await cryptoService.negotiateKey(peerId)
+      if (requestJson) {
+        await sendToPeer(friend, createPacket('key-negotiation', JSON.parse(requestJson)))
+        await cryptoService.waitForSessionKey(peerId)
+      }
+    }
+
     const stat = fs.statSync(filePath)
     if (stat.size > MAX_FILE_SIZE) throw new Error('File size exceeds 2GB limit')
 
@@ -48,6 +57,18 @@ class FileTransferService implements IFileTransferService {
     const fileName = path.basename(filePath)
     const md5 = this.calculateMD5(filePath)
     const selfPeerId = storageService.loadConfig()?.peerId || ''
+
+    // 将文件复制到 FILES_DIR 目录，以便后续发送数据块
+    const dataDir = getDataDir()
+    const filesDir = path.join(dataDir, FILES_DIR)
+    if (!fs.existsSync(filesDir)) {
+      fs.mkdirSync(filesDir, { recursive: true })
+    }
+    // 使用 transferId 作为文件名前缀，避免同名文件冲突
+    const storedFileName = `${transferId}_${fileName}`
+    const storedFilePath = path.join(filesDir, storedFileName)
+    fs.copyFileSync(filePath, storedFilePath)
+    log.info(`File copied to ${storedFilePath} for transfer ${transferId}`)
 
     const request: FileRequestPacket = {
       version: PROTOCOL_VERSION,
@@ -67,7 +88,7 @@ class FileTransferService implements IFileTransferService {
       transferId,
       peerId,
       direction: 'send',
-      fileName,
+      fileName: storedFileName,  // 存储实际文件名（带 transferId 前缀）
       fileSize: stat.size,
       status: FileTransferStatus.PENDING,
       progress: 0,
@@ -75,6 +96,19 @@ class FileTransferService implements IFileTransferService {
       timestamp: Date.now(),
     }
     storageService.saveFileTransfer(record)
+
+    const chatRecord: ChatRecord = {
+      id: transferId,
+      peerId,
+      type: MessageType.FILE,
+      direction: 'sent',
+      content: '',
+      fileName,  // 聊天记录中显示原始文件名
+      fileSize: stat.size,
+      status: MessageStatus.SENT,
+      timestamp: Date.now(),
+    }
+    storageService.saveChatRecord(chatRecord)
 
     return transferId
   }
@@ -85,6 +119,7 @@ class FileTransferService implements IFileTransferService {
     if (!transfer) return
 
     storageService.updateFileTransferStatus(transferId, FileTransferStatus.ACCEPTED)
+    storageService.updateFileTransferSavePath(transferId, savePath)
 
     const accept: FileAcceptPacket = {
       version: PROTOCOL_VERSION,
@@ -210,7 +245,8 @@ class FileTransferService implements IFileTransferService {
     const totalSize = transfer.fileSize
     let sentSize = 0
 
-    readStream.on('data', (chunk: Buffer) => {
+    readStream.on('data', (chunk: string | Buffer) => {
+      if (typeof chunk === 'string') chunk = Buffer.from(chunk)
       // 检查是否已取消
       if (!activeTransfers.has(transferId)) {
         readStream.destroy()

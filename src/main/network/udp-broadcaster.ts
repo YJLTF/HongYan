@@ -6,6 +6,11 @@ import { storageService } from '../storage/storage-service'
 import { getNetworkInterfaces } from './network-utils'
 import log from 'electron-log'
 
+// 生产环境仅使用配置的单一端口，多端口仅用于开发测试
+const SCAN_UDP_PORTS = process.env.NODE_ENV === 'development' 
+  ? [19876, 19877, 19878, 19879, 19880]
+  : [UDP_PORT]
+
 class UdpBroadcaster {
   private socket: dgram.Socket | null = null
   private timer: NodeJS.Timeout | null = null
@@ -65,7 +70,7 @@ class UdpBroadcaster {
   }
 
   scanSegment(broadcastAddress: string): void {
-    this.sendAnnouncement(broadcastAddress)
+    this.sendAnnouncement(broadcastAddress, true)
     log.info('Scanning segment via broadcast:', broadcastAddress)
   }
 
@@ -89,11 +94,11 @@ class UdpBroadcaster {
 
     const segments = getNetworkInterfaces()
     for (const seg of segments) {
-      this.sendAnnouncement(seg.broadcast)
+      this.sendAnnouncement(seg.broadcast, true)
     }
   }
 
-  private sendAnnouncement(broadcastAddress: string): void {
+  private sendAnnouncement(broadcastAddress: string, scanAllPorts: boolean = false): void {
     if (!this.socket) return
     const announcement: PresenceAnnouncement = {
       version: PROTOCOL_VERSION,
@@ -104,14 +109,35 @@ class UdpBroadcaster {
       timestamp: Date.now(),
     }
     const msg = Buffer.from(JSON.stringify({ kind: 'announcement', data: announcement }), 'utf-8')
-    this.socket.send(msg, 0, msg.length, UDP_PORT, broadcastAddress, (err) => {
-      if (err) log.error('Broadcast send error:', err)
-    })
+    
+    const ports = scanAllPorts ? SCAN_UDP_PORTS : [UDP_PORT]
+    
+    // 避免重复发送：只发送到网段广播地址，不重复发送到 255.255.255.255 和 127.0.0.1
+    // 127.0.0.1 仅在开发模式发送用于本地测试
+    const targets: Array<{ address: string; port: number }> = []
+    
+    for (const port of ports) {
+      targets.push({ address: broadcastAddress, port })
+      
+      if (process.env.NODE_ENV === 'development') {
+        targets.push({ address: '127.0.0.1', port })
+      }
+    }
+    
+    log.debug('Sending announcement to', targets.length, 'targets')
+    
+    for (const target of targets) {
+      this.socket.send(msg, 0, msg.length, target.port, target.address, (err) => {
+        if (err) log.debug('Broadcast send error:', err)
+      })
+    }
   }
 
-  private handleMessage(msg: Buffer, rinfo: dgram.AddressInfo): void {
+  private handleMessage(msg: Buffer, rinfo: { address: string; port: number; size: number }): void {
     try {
+      log.info('Received UDP message from', rinfo.address, 'port:', rinfo.port, 'size:', rinfo.size)
       const packet = JSON.parse(msg.toString('utf-8'))
+      log.info('Packet kind:', packet.kind, 'peerId:', packet.data?.peerId)
       if (packet.kind !== 'announcement') return
       const announcement = packet.data as PresenceAnnouncement
       if (announcement.version !== PROTOCOL_VERSION) return
@@ -127,6 +153,7 @@ class UdpBroadcaster {
       }
 
       const existing = this.friends.get(friend.peerId)
+      log.info('Processing friend:', friend.peerId, 'existing:', !!existing, 'existingOnline:', existing?.online)
       this.friends.set(friend.peerId, friend)
       storageService.saveFriend(friend)
 
