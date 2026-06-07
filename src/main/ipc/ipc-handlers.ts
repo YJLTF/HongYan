@@ -154,6 +154,10 @@ export function registerIpcHandlers(): void {
     return os.homedir()
   })
 
+  ipcMain.handle('app:get-version', () => {
+    return app.getVersion()
+  })
+
   ipcMain.handle('config:set', (_event, config: any) => {
     storageService.saveConfig(config)
   })

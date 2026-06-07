@@ -2,7 +2,7 @@ import { udpBroadcaster } from '../network/udp-broadcaster'
 import { getTcpPort } from '../network/tcp-communication'
 import { parseCIDR } from '../network/network-utils'
 import { storageService } from '../storage/storage-service'
-import { pushFriendOnline, pushFriendOffline } from '../ipc/ipc-push'
+import { pushFriendOnline, pushFriendOffline, pushFriendUpdated } from '../ipc/ipc-push'
 import type { IFriendDiscoveryService, Friend } from '@shared/types'
 import log from 'electron-log'
 
@@ -24,6 +24,10 @@ class FriendDiscoveryService implements IFriendDiscoveryService {
       (peerId) => {
         log.info('Friend went offline:', peerId)
         pushFriendOffline(peerId)
+      },
+      (friend) => {
+        log.info('Friend info updated:', friend.peerId, 'nickname:', friend.nickname)
+        pushFriendUpdated(friend)
       }
     )
 

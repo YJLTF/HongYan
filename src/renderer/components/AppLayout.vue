@@ -185,6 +185,11 @@ onMounted(async () => {
     })
   )
   cleanups.push(
+    window.electronAPI.on('friend:updated', (friend: any) => {
+      friendStore.addOrUpdateFriend(friend)
+    })
+  )
+  cleanups.push(
     window.electronAPI.on('friend:offline', (peerId: string) => {
       friendStore.setOffline(peerId)
     })

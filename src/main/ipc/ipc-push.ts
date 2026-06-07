@@ -22,6 +22,10 @@ export function pushFriendOffline(peerId: string): void {
   pushEvent('friend:offline', peerId)
 }
 
+export function pushFriendUpdated(friend: any): void {
+  pushEvent('friend:updated', friend)
+}
+
 export function pushMessageReceived(message: any): void {
   pushEvent('message:received', message)
 }

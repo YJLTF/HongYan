@@ -21,6 +21,7 @@ class UdpBroadcaster {
   private selfTcpPort = 19877
   private onFriendOnline: ((friend: Friend) => void) | null = null
   private onFriendOffline: ((peerId: string) => void) | null = null
+  private onFriendUpdated: ((friend: Friend) => void) | null = null
 
   start(peerId: string, nickname: string, tcpPort: number): void {
     this.selfPeerId = peerId
@@ -76,10 +77,12 @@ class UdpBroadcaster {
 
   setCallbacks(
     onOnline: (friend: Friend) => void,
-    onOffline: (peerId: string) => void
+    onOffline: (peerId: string) => void,
+    onUpdated?: (friend: Friend) => void
   ): void {
     this.onFriendOnline = onOnline
     this.onFriendOffline = onOffline
+    this.onFriendUpdated = onUpdated ?? null
   }
 
   getFriends(): Friend[] {
@@ -153,13 +156,34 @@ class UdpBroadcaster {
       }
 
       const existing = this.friends.get(friend.peerId)
-      log.info('Processing friend:', friend.peerId, 'existing:', !!existing, 'existingOnline:', existing?.online)
-      this.friends.set(friend.peerId, friend)
-      storageService.saveFriend(friend)
+      const isNew = !existing
+      const justCameOnline = !!existing && !existing.online
+      const infoChanged = !!existing && existing.online && (
+        existing.nickname !== friend.nickname ||
+        existing.ip !== friend.ip ||
+        existing.tcpPort !== friend.tcpPort
+      )
 
-      if (!existing || !existing.online) {
-        log.info('Friend online:', friend.nickname, friend.ip)
-        this.onFriendOnline?.(friend)
+      log.info('Processing friend:', friend.peerId, 'isNew:', isNew, 'justCameOnline:', justCameOnline, 'infoChanged:', infoChanged)
+
+      // 已在线好友的信息变更：保留本地的 remark/avatar，只覆盖公告里提供的字段
+      let toPersist: Friend = friend
+      if (infoChanged && existing) {
+        toPersist = {
+          ...friend,
+          remark: existing.remark,
+          avatar: existing.avatar,
+        }
+      }
+      this.friends.set(friend.peerId, toPersist)
+      storageService.saveFriend(toPersist)
+
+      if (isNew || justCameOnline) {
+        log.info('Friend online:', toPersist.nickname, toPersist.ip)
+        this.onFriendOnline?.(toPersist)
+      } else if (infoChanged) {
+        log.info('Friend info updated:', toPersist.peerId, 'nickname:', toPersist.nickname)
+        this.onFriendUpdated?.(toPersist)
       }
     } catch (err) {
       // ignore malformed packets

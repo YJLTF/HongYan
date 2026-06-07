@@ -208,6 +208,7 @@ export interface IStorageService {
 export const MainToRendererChannels = {
   FRIEND_ONLINE: 'friend:online',
   FRIEND_OFFLINE: 'friend:offline',
+  FRIEND_UPDATED: 'friend:updated',
   MESSAGE_RECEIVED: 'message:received',
   MESSAGE_STATUS_UPDATED: 'message:status-updated',
   FILE_TRANSFER_REQUEST: 'file:transfer-request',

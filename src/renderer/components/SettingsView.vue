@@ -143,7 +143,7 @@
           <h4 class="section-title">关于</h4>
           <div class="about-info">
             <p class="app-name">鸿雁 (HongYan)</p>
-            <p class="version">版本 1.0.0</p>
+            <p class="version">版本 {{ appVersion }}</p>
             <p class="description">局域网点对点即时通讯工具</p>
           </div>
         </section>
@@ -179,6 +179,7 @@ const localConfig = ref<LocalConfig>({
 
 const scanSegmentsText = ref('')
 const isRefreshing = ref(false)
+const appVersion = ref('—')
 
 onMounted(async () => {
   const config = await window.electronAPI.invoke('config:get')
@@ -207,6 +208,15 @@ onMounted(async () => {
     if (config.scanSegments && Array.isArray(config.scanSegments)) {
       scanSegmentsText.value = config.scanSegments.join('\n')
     }
+  }
+
+  try {
+    const version = await window.electronAPI.invoke('app:get-version')
+    if (typeof version === 'string' && version.length > 0) {
+      appVersion.value = version
+    }
+  } catch (err) {
+    console.error('Failed to get app version:', err)
   }
 })
 
