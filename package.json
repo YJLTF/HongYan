@@ -1,6 +1,6 @@
 {
   "name": "hongyan",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "HongYan LAN P2P Messenger",
   "main": "dist/main/index.js",
   "scripts": {
