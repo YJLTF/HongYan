@@ -221,3 +221,9 @@ export function registerIpcHandlers(): void {
 
   log.info('IPC handlers registered')
 }
+
+// 重启应用
+ipcMain.handle('app:restart', () => {
+  app.relaunch()
+  app.exit(0)
+})

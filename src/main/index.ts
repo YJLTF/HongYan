@@ -1,7 +1,8 @@
 import path from 'path'
+import fs from 'fs'
 import { app, BrowserWindow, Menu } from 'electron'
 import log from 'electron-log'
-import { initDatabase, closeDatabase } from './storage/database'
+import { initDatabase, closeDatabase, getDefaultDataDir, getDataDir } from './storage/database'
 import { storageService } from './storage/storage-service'
 import { cryptoService } from './crypto/crypto-service'
 import { startTcpServer, stopTcpServer } from './network/tcp-communication'
@@ -16,6 +17,7 @@ import { setMainWindow, pushFriendOnline, pushFriendOffline, pushMessageReceived
 import type { AppConfig, ProtocolPacket, ChatRecord, FileTransferRecord } from '@shared/types'
 import { MessageType, MessageStatus, FileTransferStatus } from '@shared/types'
 import crypto from 'crypto'
+import { FILES_DIR, LOGS_DIR, DB_NAME } from '@shared/constants'
 
 log.transports.file.level = 'info'
 log.transports.console.level = 'info'
@@ -92,9 +94,7 @@ function setupApplicationMenu(): void {
 async function initApp(): Promise<void> {
   log.info('Initializing HongYan...')
 
-  await initDatabase()
-  log.info('Database initialized')
-
+  // 先加载配置，获取 userDataDir 设置
   let config = storageService.loadConfig()
   if (!config) {
     config = {
@@ -104,6 +104,13 @@ async function initApp(): Promise<void> {
     storageService.saveConfig(config)
   }
   log.info('Config loaded, peerId:', config.peerId)
+
+  // 检查是否需要迁移数据到新目录
+  await migrateDataIfNeeded(config)
+
+  // 使用配置初始化数据库（传入 config 以确定数据目录）
+  await initDatabase(config)
+  log.info('Database initialized')
 
   cryptoService.init(config.peerId)
   log.info('Crypto service initialized')
@@ -124,6 +131,74 @@ async function initApp(): Promise<void> {
 
   createWindow()
   log.info('Application started successfully')
+}
+
+// 检查并迁移数据到新的 userDataDir
+async function migrateDataIfNeeded(config: AppConfig): Promise<void> {
+  const oldDir = getDefaultDataDir()
+  const newDir = getDataDir(config)
+
+  // 如果新旧目录相同，或者新目录已存在（已有数据），不需要迁移
+  if (oldDir === newDir) {
+    return
+  }
+
+  // 检查旧目录是否有数据需要迁移
+  const dbPath = path.join(oldDir, DB_NAME.replace('.db', '.json'))
+  if (!fs.existsSync(dbPath)) {
+    log.info('No data to migrate from default directory')
+    return
+  }
+
+  log.info(`Migrating data from ${oldDir} to ${newDir}`)
+
+  // 确保新目录存在
+  if (!fs.existsSync(newDir)) {
+    fs.mkdirSync(newDir, { recursive: true })
+  }
+
+  // 迁移数据库文件
+  const newDbPath = path.join(newDir, DB_NAME.replace('.db', '.json'))
+  const oldDbStat = fs.statSync(dbPath)
+  // 只迁移有数据的数据库
+  if (oldDbStat.size > 50) { // 空数据库文件大约50字节
+    fs.copyFileSync(dbPath, newDbPath)
+    log.info('Database file migrated')
+  }
+
+  // 迁移 files 目录
+  const oldFilesDir = path.join(oldDir, FILES_DIR)
+  if (fs.existsSync(oldFilesDir)) {
+    const newFilesDir = path.join(newDir, FILES_DIR)
+    copyDirectory(oldFilesDir, newFilesDir)
+    log.info('Files directory migrated')
+  }
+
+  // 迁移 logs 目录
+  const oldLogsDir = path.join(oldDir, LOGS_DIR)
+  if (fs.existsSync(oldLogsDir)) {
+    const newLogsDir = path.join(newDir, LOGS_DIR)
+    copyDirectory(oldLogsDir, newLogsDir)
+    log.info('Logs directory migrated')
+  }
+
+  log.info('Data migration completed')
+}
+
+function copyDirectory(src: string, dest: string): void {
+  if (!fs.existsSync(dest)) {
+    fs.mkdirSync(dest, { recursive: true })
+  }
+  const entries = fs.readdirSync(src, { withFileTypes: true })
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name)
+    const destPath = path.join(dest, entry.name)
+    if (entry.isDirectory()) {
+      copyDirectory(srcPath, destPath)
+    } else {
+      fs.copyFileSync(srcPath, destPath)
+    }
+  }
 }
 
 function handleIncomingPacket(packet: ProtocolPacket, peerIp: string): void {

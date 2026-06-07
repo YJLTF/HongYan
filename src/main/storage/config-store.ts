@@ -5,6 +5,7 @@ import { APP_DATA_DIR, CONFIG_FILE } from '@shared/constants'
 import type { AppConfig } from '@shared/types'
 import log from 'electron-log'
 
+// Config 文件始终存储在默认位置，userDataDir 只影响数据库等数据文件的位置
 const configPath = path.join(app.getPath('appData'), APP_DATA_DIR, CONFIG_FILE)
 
 export function loadConfig(): AppConfig | null {

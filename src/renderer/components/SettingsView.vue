@@ -286,7 +286,22 @@ async function saveStorageConfig() {
     // 更新 configStore 使设置立即生效
     configStore.downloadPath = localConfig.value.downloadPath
     configStore.userDataDir = localConfig.value.userDataDir
-    alert('路径设置已保存')
+
+    // 检查是否修改了 userDataDir
+    const oldUserDataDir = config.userDataDir || ''
+    const newUserDataDir = localConfig.value.userDataDir || ''
+    const userDataDirChanged = oldUserDataDir !== newUserDataDir
+
+    if (userDataDirChanged) {
+      // 提示用户重启应用
+      const confirmed = confirm('数据目录已修改，需要重启应用才能生效。是否立即重启？')
+      if (confirmed) {
+        await window.electronAPI.invoke('app:restart')
+        return
+      }
+    } else {
+      alert('路径设置已保存')
+    }
   } catch (err) {
     console.error('Failed to save storage config:', err)
     alert('保存失败')
