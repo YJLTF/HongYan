@@ -71,6 +71,10 @@
         }
       ]
     },
-    "asar": false
+    "asar": false,
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

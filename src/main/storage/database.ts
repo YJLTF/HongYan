@@ -4,7 +4,7 @@ import { app } from 'electron'
 import { Low } from 'lowdb'
 import { JSONFile } from 'lowdb/node'
 import { DB_NAME, APP_DATA_DIR, FILES_DIR, LOGS_DIR } from '@shared/constants'
-import type { ChatRecord, Friend, FileTransferRecord } from '@shared/types'
+import type { ChatRecord, Friend, FileTransferRecord, AppConfig } from '@shared/types'
 import log from 'electron-log'
 
 interface DatabaseSchema {
@@ -22,8 +22,21 @@ export function getDatabase(): Low<DatabaseSchema> {
   return db
 }
 
-export async function initDatabase(): Promise<Low<DatabaseSchema>> {
-  const dataDir = path.join(app.getPath('appData'), APP_DATA_DIR)
+// 获取默认数据目录（不依赖配置）
+export function getDefaultDataDir(): string {
+  return path.join(app.getPath('appData'), APP_DATA_DIR)
+}
+
+// 根据配置获取数据目录
+export function getDataDir(config?: AppConfig): string {
+  if (config?.userDataDir) {
+    return config.userDataDir
+  }
+  return getDefaultDataDir()
+}
+
+export async function initDatabase(config?: AppConfig): Promise<Low<DatabaseSchema>> {
+  const dataDir = getDataDir(config)
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true })
   }
@@ -64,6 +77,6 @@ export function closeDatabase(): void {
   }
 }
 
-export function getDataDir(): string {
-  return path.join(app.getPath('appData'), APP_DATA_DIR)
+export function getDataDirPath(): string {
+  return getDataDir()
 }
