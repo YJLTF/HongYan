@@ -1,7 +1,3 @@
-.arts/
-.claude/
-.codeartsdoer/
-build/
 dist/
 node_modules/
 out/
