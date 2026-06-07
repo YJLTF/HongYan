@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, dialog } from 'electron'
+import { ipcMain, BrowserWindow, dialog, app } from 'electron'
 import os from 'os'
 import { friendDiscoveryService } from '../services/friend-discovery-service'
 import { messageService } from '../services/message-service'
