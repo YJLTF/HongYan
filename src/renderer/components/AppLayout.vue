@@ -245,6 +245,19 @@ onMounted(async () => {
     })
   )
 
+  // V1.3.0: 首次最小化到托盘时给用户一个 in-app 提示
+  cleanups.push(
+    window.electronAPI.on('app:minimized-to-tray', () => {
+      notificationRef.value?.showNotification(
+        'info',
+        '已最小化到系统托盘',
+        '窗口已隐藏到托盘，双击托盘图标或右键 → 显示主窗口 即可恢复',
+        undefined,
+        6000
+      )
+    })
+  )
+
   watchSelectedFriend()
 })
 
