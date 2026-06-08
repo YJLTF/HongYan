@@ -117,12 +117,12 @@
         <!-- 网段扫描配置 -->
         <section class="settings-section">
           <h4 class="section-title">网段扫描配置</h4>
-          
+
           <div class="setting-item">
             <label for="scan-segments">扫描网段（每行一个，支持 CIDR 格式）</label>
-            <textarea 
+            <textarea
               id="scan-segments"
-              v-model="scanSegmentsText" 
+              v-model="scanSegmentsText"
               placeholder="例如：&#10;192.168.1.0/24&#10;192.168.31.0/24&#10;10.0.0.0/24"
               rows="5"
               maxlength="500"
@@ -135,6 +135,23 @@
             <button class="btn-secondary" @click="refreshFriends" :disabled="isRefreshing">
               {{ isRefreshing ? '刷新中...' : '刷新好友' }}
             </button>
+          </div>
+        </section>
+
+        <!-- V1.2.0: UDP 广播配置 -->
+        <section class="settings-section">
+          <h4 class="section-title">UDP 广播配置</h4>
+
+          <div class="setting-item">
+            <label for="heartbeat-interval">低频心跳间隔</label>
+            <select id="heartbeat-interval" v-model="heartbeatPreset" @change="onHeartbeatPresetChange">
+              <option value="0">关闭（仅靠事件 + TCP 连接状态）</option>
+              <option value="30000">30 秒（最快响应）</option>
+              <option value="60000">60 秒（推荐）</option>
+              <option value="120000">2 分钟</option>
+              <option value="300000">5 分钟（最省流量）</option>
+            </select>
+            <p class="help-text">心跳仅作为"对方静默崩溃"的兜底检测；正常情况仅在上线/下线/资料变更时广播</p>
           </div>
         </section>
 
@@ -180,6 +197,8 @@ const localConfig = ref<LocalConfig>({
 const scanSegmentsText = ref('')
 const isRefreshing = ref(false)
 const appVersion = ref('—')
+// V1.2.0: 心跳间隔预设（字符串键方便 v-model 绑定）
+const heartbeatPreset = ref('60000')
 
 onMounted(async () => {
   const config = await window.electronAPI.invoke('config:get')
@@ -217,6 +236,9 @@ onMounted(async () => {
   } catch (err) {
     console.error('Failed to get app version:', err)
   }
+
+  // V1.2.0: 加载心跳配置
+  heartbeatPreset.value = String(config?.heartbeatIntervalMs ?? 60000)
 })
 
 async function saveConfig() {
@@ -357,6 +379,21 @@ async function refreshFriends() {
     alert('刷新失败')
   } finally {
     isRefreshing.value = false
+  }
+}
+
+// V1.2.0: 心跳配置变更时持久化
+async function onHeartbeatPresetChange() {
+  const newVal = Number(heartbeatPreset.value)
+  try {
+    const config = await window.electronAPI.invoke('config:get')
+    await window.electronAPI.invoke('config:set', {
+      ...config,
+      heartbeatIntervalMs: newVal,
+    })
+  } catch (err) {
+    console.error('Failed to save heartbeat config:', err)
+    alert('保存失败')
   }
 }
 

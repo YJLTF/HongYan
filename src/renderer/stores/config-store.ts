@@ -8,6 +8,7 @@ export const useConfigStore = defineStore('config', () => {
   const avatar = ref<string>('')
   const downloadPath = ref<string>('')
   const userDataDir = ref<string>('')
+  const heartbeatIntervalMs = ref<number>(60000)
 
   function setConfig(config: AppConfig) {
     peerId.value = config.peerId
@@ -15,7 +16,8 @@ export const useConfigStore = defineStore('config', () => {
     avatar.value = config.avatar || ''
     downloadPath.value = config.downloadPath || ''
     userDataDir.value = config.userDataDir || ''
+    heartbeatIntervalMs.value = config.heartbeatIntervalMs ?? 60000
   }
 
-  return { peerId, nickname, avatar, downloadPath, userDataDir, setConfig }
+  return { peerId, nickname, avatar, downloadPath, userDataDir, heartbeatIntervalMs, setConfig }
 })

@@ -1,4 +1,5 @@
 import net from 'net'
+import { EventEmitter } from 'events'
 import { sendTcpPacketAndConnect } from './tcp-communication'
 import type { ProtocolPacket, Friend } from '@shared/types'
 import log from 'electron-log'
@@ -12,10 +13,19 @@ interface ManagedConnection {
 const connections = new Map<string, ManagedConnection>()
 let onPacketReceived: ((data: ProtocolPacket, peerId: string) => void) | null = null
 
+// V1.2.0: 事件总线，供其他模块订阅 TCP 连接断开事件
+// 应用：friend-discovery-service 订阅 peer:disconnected 以立即标记好友离线
+const connectionEvents = new EventEmitter()
+
 export function setPacketHandler(
   handler: (data: ProtocolPacket, peerId: string) => void
 ): void {
   onPacketReceived = handler
+}
+
+// V1.2.0: 导出事件总线
+export function getConnectionEvents(): EventEmitter {
+  return connectionEvents
 }
 
 export function getConnection(peerId: string): ManagedConnection | undefined {
@@ -60,11 +70,14 @@ export function addConnection(peerId: string, socket: net.Socket, initialPackets
   socket.on('close', () => {
     connections.delete(peerId)
     log.info('Connection closed for peer:', peerId)
+    // V1.2.0: 主动 emit，供 friend-discovery-service 立即标记离线（不等 UDP 心跳超时）
+    connectionEvents.emit('peer:disconnected', peerId)
   })
 
   socket.on('error', (err) => {
     log.error('Connection error for peer:', peerId, err)
     connections.delete(peerId)
+    connectionEvents.emit('peer:disconnected', peerId)
   })
 }
 

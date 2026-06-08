@@ -66,6 +66,8 @@ class MessageService implements IMessageService {
     } catch (err) {
       record.status = MessageStatus.FAILED
       storageService.saveChatRecord(record)
+      // V1.2.0: 发送失败时触发一次 UDP 广播，以便重新发现对方（IP/端口可能变更）
+      udpBroadcaster.refresh()
       log.error('Failed to send text message:', err)
       throw err
     }
@@ -117,6 +119,8 @@ class MessageService implements IMessageService {
     } catch (err) {
       record.status = MessageStatus.FAILED
       storageService.saveChatRecord(record)
+      // V1.2.0: 图片发送失败时也触发一次广播
+      udpBroadcaster.refresh()
       throw err
     }
 

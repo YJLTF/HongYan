@@ -337,7 +337,8 @@ async function handleKeyNegotiation(packet: ProtocolPacket, peerIp: string): Pro
 
 async function shutdownApp(): Promise<void> {
   log.info('Shutting down HongYan...')
-  friendDiscoveryService.stop()
+  // V1.2.0: 优雅退出时广播下线公告，让好友立即知道本机已下线
+  friendDiscoveryService.stop({ graceful: true })
   stopTcpServer()
   closeDatabase()
   cryptoService.destroy()

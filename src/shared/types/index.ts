@@ -97,6 +97,8 @@ export interface AppConfig {
   scanSegments?: string[] // 需要扫描的网段列表
   userDataDir?: string   // 自定义数据目录（需要重启应用生效）
   downloadPath?: string   // 默认下载路径
+  // V1.2.0：低频心跳间隔（ms），用于检测对方静默崩溃；0 = 完全关闭心跳
+  heartbeatIntervalMs?: number
 }
 
 export interface EncryptedData {
@@ -220,6 +222,7 @@ export const MainToRendererChannels = {
 
 export const RendererToMainChannels = {
   FRIEND_SCAN_SEGMENT: 'friend:scan-segment',
+  FRIEND_REFRESH: 'friend:refresh',
   MESSAGE_SEND_TEXT: 'message:send-text',
   MESSAGE_SEND_IMAGE: 'message:send-image',
   CHAT_LOAD_HISTORY: 'chat:load-history',

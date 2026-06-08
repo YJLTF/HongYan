@@ -62,18 +62,28 @@
             <circle cx="11" cy="11" r="8"/>
             <path d="m21 21-4.35-4.35"/>
           </svg>
-          <input 
-            type="text" 
-            placeholder="搜索好友" 
+          <input
+            type="text"
+            placeholder="搜索好友"
             v-model="searchQuery"
           />
         </div>
-        <button class="scan-btn" @click="showScanConfig = true" title="扫描配置">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-          </svg>
-          <span>扫描配置</span>
-        </button>
+        <div class="sidebar-actions">
+          <button class="icon-btn" @click="handleRefreshFriends" title="刷新好友" :disabled="isRefreshing">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10"/>
+              <polyline points="1 20 1 14 7 14"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+            <span>{{ isRefreshing ? '刷新中...' : '刷新' }}</span>
+          </button>
+          <button class="icon-btn" @click="showScanConfig = true" title="扫描配置">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+            </svg>
+            <span>扫描</span>
+          </button>
+        </div>
       </div>
       <FriendList 
         :friends="filteredFriends"
@@ -148,6 +158,7 @@ const showImageViewer = ref(false)
 const showScanConfig = ref(false)
 const currentImageData = ref('')
 const searchQuery = ref('')
+const isRefreshing = ref(false)
 
 const cleanups: (() => void)[] = []
 
@@ -309,6 +320,25 @@ function switchToContacts() {
 
 function handleFriendsRefreshed(friends: any[]) {
   friendStore.updateFriends(friends)
+}
+
+// V1.2.0: 手动触发 UDP 广播，事件驱动机制下用户需要主动重发现好友
+async function handleRefreshFriends() {
+  if (isRefreshing.value) return
+  isRefreshing.value = true
+  try {
+    await window.electronAPI.invoke('friend:refresh')
+    // 等待一会让广播有时间传播
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    const friends = await window.electronAPI.invoke('friend:list')
+    if (Array.isArray(friends)) {
+      friendStore.updateFriends(friends)
+    }
+  } catch (err) {
+    console.error('Refresh friends failed:', err)
+  } finally {
+    isRefreshing.value = false
+  }
 }
 
 function getInitials(name: string): string {
@@ -518,6 +548,40 @@ function getInitials(name: string): string {
 
 .scan-btn:active {
   transform: translateY(0);
+}
+
+/* V1.2.0: 好友列表侧边栏操作行 */
+.sidebar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.icon-btn {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  background: #fff;
+  color: #666;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+}
+
+.icon-btn:hover:not(:disabled) {
+  border-color: #07c160;
+  color: #07c160;
+  background: rgba(7, 193, 96, 0.05);
+}
+
+.icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* 主内容区域 */

@@ -19,8 +19,17 @@ export function getAppDataDir(): string {
 }
 
 export const BROADCAST_INTERVAL_MS = process.env.NODE_ENV === 'development' ? 5000 : 10000
+
+// V1.2.0：低频心跳仅作为"对方静默崩溃"的兜底检测；0 表示关闭
+// 事件驱动广播：上线/下线/昵称头像变更/手动刷新/消息发送失败 各自触发一次广播
+export const DEFAULT_HEARTBEAT_INTERVAL_MS = 60000
 export const ONLINE_TIMEOUT_MS = 30000
 export const SCAN_TIMEOUT_MS = 10000
+
+export const ANNOUNCEMENT_KIND = {
+  PRESENCE: 'announcement',
+  LEAVING: 'announcement-leaving',
+} as const
 export const KEY_EXPIRY_MS = 3600000
 export const FILE_CHUNK_SIZE = 65536
 export const MAX_FILE_SIZE = 2147483648
