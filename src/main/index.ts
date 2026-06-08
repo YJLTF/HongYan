@@ -14,7 +14,7 @@ import { hasPendingNegotiation } from './crypto/key-negotiation'
 import { clearIdentity } from './crypto/identity'
 import { createPacket } from './network/protocol'
 import { registerIpcHandlers } from './ipc/ipc-handlers'
-import { setMainWindow, pushFriendOnline, pushFriendOffline, pushMessageReceived, pushFileTransferRequest } from './ipc/ipc-push'
+import { setMainWindow, getMainWindow, pushFriendOnline, pushFriendOffline, pushMessageReceived, pushFileTransferRequest } from './ipc/ipc-push'
 import { createTray, destroyTray, showMainWindow as showTrayMainWindow } from './tray'
 import { initFlashManager, notify as flashNotify, attachFocusAutoClear } from './notifications/flash-manager'
 import { initNotificationManager, showMessage as notifMessage, showFileRequest as notifFileRequest } from './notifications/notification-manager'
@@ -34,12 +34,6 @@ if (process.platform === 'win32') {
 let mainWindow: BrowserWindow | null = null
 let isQuitting = false
 let hasShownTrayTip = false
-
-function getMainWindow(): BrowserWindow | null {
-  return mainWindow
-}
-
-export { getMainWindow }
 
 /**
  * V1.3.0: 拦截窗口 close 事件

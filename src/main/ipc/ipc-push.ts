@@ -6,6 +6,21 @@ let mainWindow: BrowserWindow | null = null
 
 export function setMainWindow(win: BrowserWindow): void {
   mainWindow = win
+  // V1.3.0: 注册 closed 自清理，避免外部模块持有悬空引用
+  win.on('closed', () => {
+    if (mainWindow === win) {
+      mainWindow = null
+    }
+  })
+}
+
+/**
+ * V1.3.0: 主窗口引用的单一真源
+ * 之前 ipc-handlers.ts 用 require('../index') 试图获取 mainWindow 引入了循环依赖
+ * 且 rollup 不会处理局部模块的动态 require。改用 ipc-push 作为统一访问点。
+ */
+export function getMainWindow(): BrowserWindow | null {
+  return mainWindow
 }
 
 export function pushEvent(channel: string, ...args: any[]): void {
