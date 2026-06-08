@@ -12,257 +12,285 @@
         </button>
       </div>
 
-      <div class="dialog-content">
-        <!-- 个人资料 -->
-        <section class="settings-section">
-          <h4 class="section-title">个人资料</h4>
-          
-          <div class="setting-item avatar-setting">
-            <label>头像</label>
-            <div class="avatar-upload">
-              <img 
-                v-if="localConfig.avatar" 
-                :src="localConfig.avatar" 
-                alt="avatar"
-                class="avatar-preview"
-              />
-              <div v-else class="avatar-placeholder">
-                {{ getInitials(localConfig.nickname) }}
-              </div>
-              <button class="change-avatar-btn" @click="selectAvatar">
-                更换头像
-              </button>
-            </div>
-          </div>
+      <div class="dialog-body">
+        <!-- 左侧纵向 tab 导航 -->
+        <nav class="tab-nav">
+          <button
+            v-for="tab in tabs"
+            :key="tab.key"
+            class="tab-item"
+            :class="{ active: activeTab === tab.key }"
+            @click="activeTab = tab.key"
+          >
+            <span class="tab-icon" v-html="tab.icon"></span>
+            <span class="tab-label">{{ tab.label }}</span>
+            <span v-if="tab.badge" class="tab-badge">V1.3.0</span>
+          </button>
+        </nav>
 
-          <div class="setting-item">
-            <label for="nickname">昵称</label>
-            <input 
-              id="nickname"
-              v-model="localConfig.nickname" 
-              @change="saveConfig"
-              placeholder="输入昵称"
-              maxlength="20"
-            />
-          </div>
+        <!-- 右侧内容区 -->
+        <div class="tab-content">
+          <!-- 个人 -->
+          <section v-show="activeTab === 'profile'" class="settings-section">
+            <h4 class="section-title">个人资料</h4>
 
-          <div class="setting-item">
-            <label>Peer ID</label>
-            <div class="peer-id-display">
-              <code>{{ configStore.peerId }}</code>
-              <button class="copy-btn" @click="copyPeerId" title="复制">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                </svg>
-              </button>
-            </div>
-          </div>
-        </section>
-
-        <!-- 存储设置 -->
-        <section class="settings-section">
-          <h4 class="section-title">消息提醒（V1.3.0）</h4>
-
-          <div class="setting-item toggle-item">
-            <div class="toggle-label">
-              <label>关闭按钮最小化到托盘</label>
-              <span class="path-hint">关闭主窗口时隐藏到系统托盘，不退出进程</span>
-            </div>
-            <label class="switch">
-              <input type="checkbox" v-model="localConfig.closeToTray" />
-              <span class="slider"></span>
-            </label>
-          </div>
-
-          <div class="setting-item toggle-item">
-            <div class="toggle-label">
-              <label>启用 Windows 横幅通知</label>
-              <span class="path-hint">收到消息时弹出系统通知</span>
-            </div>
-            <label class="switch">
-              <input type="checkbox" v-model="localConfig.enableNotifications" />
-              <span class="slider"></span>
-            </label>
-          </div>
-
-          <div class="setting-item toggle-item">
-            <div class="toggle-label">
-              <label>启用任务栏闪烁</label>
-              <span class="path-hint">窗口未聚焦时让任务栏图标闪烁</span>
-            </div>
-            <label class="switch">
-              <input type="checkbox" v-model="localConfig.enableTaskbarFlash" />
-              <span class="slider"></span>
-            </label>
-          </div>
-
-          <div class="setting-item toggle-item">
-            <div class="toggle-label">
-              <label>启用托盘图标闪烁</label>
-              <span class="path-hint">收到消息时让托盘图标闪烁</span>
-            </div>
-            <label class="switch">
-              <input type="checkbox" v-model="localConfig.enableTrayFlash" />
-              <span class="slider"></span>
-            </label>
-          </div>
-
-          <div class="setting-item toggle-item">
-            <div class="toggle-label">
-              <label>免打扰时段</label>
-              <span class="path-hint">该时段内不弹横幅、不闪烁，仅记录消息</span>
-            </div>
-            <label class="switch">
-              <input type="checkbox" v-model="localConfig.dndEnabled" />
-              <span class="slider"></span>
-            </label>
-          </div>
-
-          <div v-if="localConfig.dndEnabled" class="setting-item">
-            <div class="dnd-row">
-              <div class="dnd-field">
-                <label>开始</label>
-                <input type="time" v-model="localConfig.dndStart" />
-              </div>
-              <div class="dnd-field">
-                <label>结束</label>
-                <input type="time" v-model="localConfig.dndEnd" />
+            <div class="setting-item avatar-setting">
+              <label>头像</label>
+              <div class="avatar-upload">
+                <img
+                  v-if="localConfig.avatar"
+                  :src="localConfig.avatar"
+                  alt="avatar"
+                  class="avatar-preview"
+                />
+                <div v-else class="avatar-placeholder">
+                  {{ getInitials(localConfig.nickname) }}
+                </div>
+                <button class="change-avatar-btn" @click="selectAvatar">
+                  更换头像
+                </button>
               </div>
             </div>
-            <p class="help-text">支持跨午夜（如 22:00 → 08:00）</p>
-          </div>
 
-          <div class="setting-actions">
-            <button class="btn-primary" @click="saveNotificationConfig">保存提醒设置</button>
-          </div>
-        </section>
-
-        <!-- 存储设置 -->
-        <section class="settings-section">
-          <h4 class="section-title">存储设置</h4>
-          
-          <div class="setting-item path-setting">
-            <div class="path-label-row">
-              <label for="download-path">默认下载路径</label>
-              <span class="path-hint">接收文件时默认保存位置</span>
-            </div>
-            <div class="path-input-row">
-              <input 
-                id="download-path"
-                v-model="localConfig.downloadPath" 
-                placeholder="点击右侧按钮选择目录"
-                readonly
-                class="path-input"
+            <div class="setting-item">
+              <label for="nickname">昵称</label>
+              <input
+                id="nickname"
+                v-model="localConfig.nickname"
+                @change="saveConfig"
+                placeholder="输入昵称"
+                maxlength="20"
               />
-              <button class="browse-btn" @click="selectDownloadPath" title="选择目录">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-                </svg>
-                浏览
+            </div>
+
+            <div class="setting-item">
+              <label>Peer ID</label>
+              <div class="peer-id-display">
+                <code>{{ configStore.peerId }}</code>
+                <button class="copy-btn" @click="copyPeerId" title="复制">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <!-- 提醒 -->
+          <section v-show="activeTab === 'notifications'" class="settings-section">
+            <h4 class="section-title">消息提醒</h4>
+
+            <div class="setting-item toggle-item">
+              <div class="toggle-label">
+                <label>关闭按钮最小化到托盘</label>
+                <span class="path-hint">关闭主窗口时隐藏到系统托盘，不退出进程</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" v-model="localConfig.closeToTray" />
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="setting-item toggle-item">
+              <div class="toggle-label">
+                <label>启用 Windows 横幅通知</label>
+                <span class="path-hint">收到消息时弹出系统通知</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" v-model="localConfig.enableNotifications" />
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="setting-item toggle-item">
+              <div class="toggle-label">
+                <label>启用任务栏闪烁</label>
+                <span class="path-hint">窗口未聚焦时让任务栏图标闪烁</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" v-model="localConfig.enableTaskbarFlash" />
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="setting-item toggle-item">
+              <div class="toggle-label">
+                <label>启用托盘图标闪烁</label>
+                <span class="path-hint">收到消息时让托盘图标闪烁</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" v-model="localConfig.enableTrayFlash" />
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="setting-item toggle-item">
+              <div class="toggle-label">
+                <label>免打扰时段</label>
+                <span class="path-hint">该时段内不弹横幅、不闪烁，仅记录消息</span>
+              </div>
+              <label class="switch">
+                <input type="checkbox" v-model="localConfig.dndEnabled" />
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div v-if="localConfig.dndEnabled" class="setting-item dnd-box">
+              <div class="dnd-row">
+                <div class="dnd-field">
+                  <label>开始</label>
+                  <input type="time" v-model="localConfig.dndStart" />
+                </div>
+                <div class="dnd-field">
+                  <label>结束</label>
+                  <input type="time" v-model="localConfig.dndEnd" />
+                </div>
+              </div>
+              <p class="help-text">支持跨午夜（如 22:00 → 08:00）</p>
+            </div>
+
+            <div class="setting-actions">
+              <button class="btn-primary" @click="saveNotificationConfig">保存提醒设置</button>
+            </div>
+          </section>
+
+          <!-- 存储 -->
+          <section v-show="activeTab === 'storage'" class="settings-section">
+            <h4 class="section-title">存储设置</h4>
+
+            <div class="setting-item path-setting">
+              <div class="path-label-row">
+                <label for="download-path">默认下载路径</label>
+                <span class="path-hint">接收文件时默认保存位置</span>
+              </div>
+              <div class="path-input-row">
+                <input
+                  id="download-path"
+                  v-model="localConfig.downloadPath"
+                  placeholder="点击右侧按钮选择目录"
+                  readonly
+                  class="path-input"
+                />
+                <button class="browse-btn" @click="selectDownloadPath" title="选择目录">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                  </svg>
+                  浏览
+                </button>
+              </div>
+            </div>
+
+            <div class="setting-item path-setting">
+              <div class="path-label-row">
+                <label for="user-data-dir">数据目录</label>
+                <span class="path-hint warning">修改后需要重启应用生效</span>
+              </div>
+              <div class="path-input-row">
+                <input
+                  id="user-data-dir"
+                  v-model="localConfig.userDataDir"
+                  placeholder="点击右侧按钮选择目录"
+                  readonly
+                  class="path-input"
+                />
+                <button class="browse-btn" @click="selectUserDataDir" title="选择目录">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                  </svg>
+                  浏览
+                </button>
+              </div>
+              <p class="help-text">当前数据存储在应用配置目录中，可自定义数据存放位置</p>
+            </div>
+
+            <div class="setting-actions">
+              <button class="btn-primary" @click="saveStorageConfig">保存路径设置</button>
+            </div>
+          </section>
+
+          <!-- 网络 -->
+          <section v-show="activeTab === 'network'" class="settings-section">
+            <h4 class="section-title">网段扫描</h4>
+
+            <div class="setting-item">
+              <label for="scan-segments">扫描网段（每行一个，支持 CIDR 格式）</label>
+              <textarea
+                id="scan-segments"
+                v-model="scanSegmentsText"
+                placeholder="例如：&#10;192.168.1.0/24&#10;192.168.31.0/24&#10;10.0.0.0/24"
+                rows="5"
+                maxlength="500"
+              ></textarea>
+              <p class="help-text">默认会扫描当前所在网段，可在此添加其他需要扫描的网段</p>
+            </div>
+
+            <div class="segment-actions">
+              <button class="btn-primary" @click="saveScanSegments">保存配置</button>
+              <button class="btn-secondary" @click="refreshFriends" :disabled="isRefreshing">
+                {{ isRefreshing ? '刷新中...' : '刷新好友' }}
               </button>
             </div>
-          </div>
 
-          <div class="setting-item path-setting">
-            <div class="path-label-row">
-              <label for="user-data-dir">数据目录</label>
-              <span class="path-hint warning">修改后需要重启应用生效</span>
-            </div>
-            <div class="path-input-row">
-              <input 
-                id="user-data-dir"
-                v-model="localConfig.userDataDir" 
-                placeholder="点击右侧按钮选择目录"
-                readonly
-                class="path-input"
-              />
-              <button class="browse-btn" @click="selectUserDataDir" title="选择目录">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            <h4 class="section-title section-title-divider">UDP 广播</h4>
+
+            <div class="setting-item">
+              <label for="heartbeat-interval">低频心跳间隔</label>
+              <div class="select-wrapper">
+                <select
+                  id="heartbeat-interval"
+                  v-model="heartbeatPreset"
+                  @change="onHeartbeatPresetChange"
+                  class="select-input"
+                >
+                  <option value="0">关闭（仅靠事件 + TCP 连接状态）</option>
+                  <option value="30000">30 秒（最快响应）</option>
+                  <option value="60000">60 秒（推荐）</option>
+                  <option value="120000">2 分钟</option>
+                  <option value="300000">5 分钟（最省流量）</option>
+                </select>
+                <svg
+                  class="select-chevron"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <polyline points="6 9 12 15 18 9" />
                 </svg>
-                浏览
-              </button>
+              </div>
+              <p class="help-text">心跳仅作为"对方静默崩溃"的兜底检测；正常情况仅在上线/下线/资料变更时广播</p>
             </div>
-            <p class="help-text">当前数据存储在应用配置目录中，可自定义数据存放位置</p>
-          </div>
+          </section>
 
-          <div class="setting-actions">
-            <button class="btn-primary" @click="saveStorageConfig">保存路径设置</button>
-          </div>
-        </section>
-
-        <!-- 网段扫描配置 -->
-        <section class="settings-section">
-          <h4 class="section-title">网段扫描配置</h4>
-
-          <div class="setting-item">
-            <label for="scan-segments">扫描网段（每行一个，支持 CIDR 格式）</label>
-            <textarea
-              id="scan-segments"
-              v-model="scanSegmentsText"
-              placeholder="例如：&#10;192.168.1.0/24&#10;192.168.31.0/24&#10;10.0.0.0/24"
-              rows="5"
-              maxlength="500"
-            ></textarea>
-            <p class="help-text">默认会扫描当前所在网段，可在此添加其他需要扫描的网段</p>
-          </div>
-
-          <div class="segment-actions">
-            <button class="btn-primary" @click="saveScanSegments">保存配置</button>
-            <button class="btn-secondary" @click="refreshFriends" :disabled="isRefreshing">
-              {{ isRefreshing ? '刷新中...' : '刷新好友' }}
-            </button>
-          </div>
-        </section>
-
-        <!-- V1.2.0: UDP 广播配置 -->
-        <section class="settings-section">
-          <h4 class="section-title">UDP 广播配置</h4>
-
-          <div class="setting-item">
-            <label for="heartbeat-interval">低频心跳间隔</label>
-            <div class="select-wrapper">
-              <select
-                id="heartbeat-interval"
-                v-model="heartbeatPreset"
-                @change="onHeartbeatPresetChange"
-                class="select-input"
-              >
-                <option value="0">关闭（仅靠事件 + TCP 连接状态）</option>
-                <option value="30000">30 秒（最快响应）</option>
-                <option value="60000">60 秒（推荐）</option>
-                <option value="120000">2 分钟</option>
-                <option value="300000">5 分钟（最省流量）</option>
-              </select>
-              <svg
-                class="select-chevron"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
+          <!-- 关于 -->
+          <section v-show="activeTab === 'about'" class="settings-section">
+            <h4 class="section-title">关于</h4>
+            <div class="about-info">
+              <div class="about-logo">
+                <img
+                  v-if="localConfig.avatar"
+                  :src="localConfig.avatar"
+                  alt="logo"
+                  class="about-logo-img"
+                />
+                <div v-else class="about-logo-placeholder">
+                  {{ getInitials(localConfig.nickname) }}
+                </div>
+              </div>
+              <p class="app-name">鸿雁 (HongYan)</p>
+              <p class="version">版本 {{ appVersion }}</p>
+              <p class="description">局域网点对点即时通讯工具</p>
+              <div class="about-divider"></div>
+              <p class="copyright">Copyright © 2026 HongYan</p>
             </div>
-            <p class="help-text">心跳仅作为"对方静默崩溃"的兜底检测；正常情况仅在上线/下线/资料变更时广播</p>
-          </div>
-        </section>
-
-        <!-- 关于 -->
-        <section class="settings-section">
-          <h4 class="section-title">关于</h4>
-          <div class="about-info">
-            <p class="app-name">鸿雁 (HongYan)</p>
-            <p class="version">版本 {{ appVersion }}</p>
-            <p class="description">局域网点对点即时通讯工具</p>
-          </div>
-        </section>
+          </section>
+        </div>
       </div>
     </div>
   </div>
@@ -306,6 +334,40 @@ const localConfig = ref<LocalConfig>({
   dndStart: configStore.dndStart,
   dndEnd: configStore.dndEnd,
 })
+
+type TabKey = 'profile' | 'notifications' | 'storage' | 'network' | 'about'
+
+const activeTab = ref<TabKey>('profile')
+
+// 内联 SVG 图标（heroicons-style，stroke-width=2）
+const tabs: { key: TabKey; label: string; icon: string; badge?: boolean }[] = [
+  {
+    key: 'profile',
+    label: '个人',
+    icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+  },
+  {
+    key: 'notifications',
+    label: '提醒',
+    badge: true,
+    icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
+  },
+  {
+    key: 'storage',
+    label: '存储',
+    icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
+  },
+  {
+    key: 'network',
+    label: '网络',
+    icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
+  },
+  {
+    key: 'about',
+    label: '关于',
+    icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
+  },
+]
 
 const scanSegmentsText = ref('')
 const isRefreshing = ref(false)
@@ -582,7 +644,7 @@ function getInitials(name: string): string {
   transform: translate(-50%, -50%);
   background: #fff;
   border-radius: 12px;
-  width: 520px;
+  width: 720px;
   max-height: 85vh;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
   display: flex;
@@ -607,6 +669,7 @@ function getInitials(name: string): string {
   justify-content: space-between;
   padding: 20px 24px;
   border-bottom: 1px solid #e8e8e8;
+  flex-shrink: 0;
 }
 
 .dialog-header h3 {
@@ -635,27 +698,115 @@ function getInitials(name: string): string {
   color: #333;
 }
 
-.dialog-content {
+/* 主体：左 tab + 右内容 */
+.dialog-body {
+  display: flex;
   flex: 1;
+  min-height: 0;
+}
+
+/* 左侧纵向 tab 导航 */
+.tab-nav {
+  width: 160px;
+  flex-shrink: 0;
+  background: #fafafa;
+  border-right: 1px solid #e8e8e8;
+  padding: 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   overflow-y: auto;
-  padding: 24px;
+}
+
+.tab-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  color: #666;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, color 0.15s;
+  position: relative;
+}
+
+.tab-item:hover {
+  background: rgba(7, 193, 96, 0.06);
+  color: #333;
+}
+
+.tab-item.active {
+  background: #fff;
+  color: #07c160;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.tab-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 18px;
+  background: #07c160;
+  border-radius: 0 2px 2px 0;
+}
+
+.tab-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.tab-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.tab-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: #07c160;
+  background: rgba(7, 193, 96, 0.12);
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+}
+
+/* 右侧内容区 */
+.tab-content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 24px 28px;
 }
 
 .settings-section {
-  margin-bottom: 28px;
-}
-
-.settings-section:last-child {
   margin-bottom: 0;
 }
 
 .section-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
-  color: #666;
-  margin: 0 0 16px;
+  color: #999;
+  margin: 0 0 18px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.6px;
+}
+
+.section-title-divider {
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid #f0f0f0;
 }
 
 .setting-item {
@@ -873,6 +1024,14 @@ function getInitials(name: string): string {
   border-color: #07c160;
 }
 
+.dnd-box {
+  margin-left: 12px;
+  padding: 12px 14px;
+  background: #fafafa;
+  border-radius: 8px;
+  border-left: 3px solid #07c160;
+}
+
 .path-label-row {
   display: flex;
   align-items: center;
@@ -941,25 +1100,60 @@ function getInitials(name: string): string {
 /* 关于信息 */
 .about-info {
   text-align: center;
-  padding: 20px;
+  padding: 32px 20px;
+}
+
+.about-logo {
+  margin-bottom: 16px;
+}
+
+.about-logo-img,
+.about-logo-placeholder {
+  width: 80px;
+  height: 80px;
+  border-radius: 18px;
+  margin: 0 auto;
+  object-fit: cover;
+  display: block;
+}
+
+.about-logo-placeholder {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 80px;
 }
 
 .app-name {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 600;
   color: #333;
-  margin-bottom: 8px;
+  margin: 0 0 6px;
 }
 
 .version {
   font-size: 13px;
   color: #999;
-  margin-bottom: 8px;
+  margin: 0 0 12px;
 }
 
 .description {
   font-size: 13px;
   color: #666;
+  margin: 0;
+}
+
+.about-divider {
+  height: 1px;
+  background: #f0f0f0;
+  margin: 24px auto;
+  width: 60%;
+}
+
+.copyright {
+  font-size: 12px;
+  color: #bbb;
   margin: 0;
 }
 
@@ -1101,20 +1295,24 @@ function getInitials(name: string): string {
 }
 
 /* 滚动条样式 */
-.dialog-content::-webkit-scrollbar {
+.tab-content::-webkit-scrollbar,
+.tab-nav::-webkit-scrollbar {
   width: 6px;
 }
 
-.dialog-content::-webkit-scrollbar-track {
+.tab-content::-webkit-scrollbar-track,
+.tab-nav::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.dialog-content::-webkit-scrollbar-thumb {
+.tab-content::-webkit-scrollbar-thumb,
+.tab-nav::-webkit-scrollbar-thumb {
   background: #ddd;
   border-radius: 3px;
 }
 
-.dialog-content::-webkit-scrollbar-thumb:hover {
+.tab-content::-webkit-scrollbar-thumb:hover,
+.tab-nav::-webkit-scrollbar-thumb:hover {
   background: #ccc;
 }
 </style>
