@@ -62,6 +62,84 @@
 
         <!-- 存储设置 -->
         <section class="settings-section">
+          <h4 class="section-title">消息提醒（V1.3.0）</h4>
+
+          <div class="setting-item toggle-item">
+            <div class="toggle-label">
+              <label>关闭按钮最小化到托盘</label>
+              <span class="path-hint">关闭主窗口时隐藏到系统托盘，不退出进程</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" v-model="localConfig.closeToTray" />
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="setting-item toggle-item">
+            <div class="toggle-label">
+              <label>启用 Windows 横幅通知</label>
+              <span class="path-hint">收到消息时弹出系统通知</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" v-model="localConfig.enableNotifications" />
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="setting-item toggle-item">
+            <div class="toggle-label">
+              <label>启用任务栏闪烁</label>
+              <span class="path-hint">窗口未聚焦时让任务栏图标闪烁</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" v-model="localConfig.enableTaskbarFlash" />
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="setting-item toggle-item">
+            <div class="toggle-label">
+              <label>启用托盘图标闪烁</label>
+              <span class="path-hint">收到消息时让托盘图标闪烁</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" v-model="localConfig.enableTrayFlash" />
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="setting-item toggle-item">
+            <div class="toggle-label">
+              <label>免打扰时段</label>
+              <span class="path-hint">该时段内不弹横幅、不闪烁，仅记录消息</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" v-model="localConfig.dndEnabled" />
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div v-if="localConfig.dndEnabled" class="setting-item">
+            <div class="dnd-row">
+              <div class="dnd-field">
+                <label>开始</label>
+                <input type="time" v-model="localConfig.dndStart" />
+              </div>
+              <div class="dnd-field">
+                <label>结束</label>
+                <input type="time" v-model="localConfig.dndEnd" />
+              </div>
+            </div>
+            <p class="help-text">支持跨午夜（如 22:00 → 08:00）</p>
+          </div>
+
+          <div class="setting-actions">
+            <button class="btn-primary" @click="saveNotificationConfig">保存提醒设置</button>
+          </div>
+        </section>
+
+        <!-- 存储设置 -->
+        <section class="settings-section">
           <h4 class="section-title">存储设置</h4>
           
           <div class="setting-item path-setting">
@@ -206,13 +284,27 @@ interface LocalConfig {
   avatar?: string
   userDataDir?: string
   downloadPath?: string
+  closeToTray: boolean
+  enableNotifications: boolean
+  enableTaskbarFlash: boolean
+  enableTrayFlash: boolean
+  dndEnabled: boolean
+  dndStart: string
+  dndEnd: string
 }
 
 const localConfig = ref<LocalConfig>({
   nickname: configStore.nickname,
   avatar: configStore.avatar,
   userDataDir: '',
-  downloadPath: ''
+  downloadPath: '',
+  closeToTray: configStore.closeToTray,
+  enableNotifications: configStore.enableNotifications,
+  enableTaskbarFlash: configStore.enableTaskbarFlash,
+  enableTrayFlash: configStore.enableTrayFlash,
+  dndEnabled: configStore.dndEnabled,
+  dndStart: configStore.dndStart,
+  dndEnd: configStore.dndEnd,
 })
 
 const scanSegmentsText = ref('')
@@ -229,20 +321,27 @@ onMounted(async () => {
       nickname: config.nickname,
       avatar: config.avatar,
       userDataDir: config.userDataDir || '',
-      downloadPath: config.downloadPath || ''
+      downloadPath: config.downloadPath || '',
+      closeToTray: config.closeToTray !== false,
+      enableNotifications: config.enableNotifications !== false,
+      enableTaskbarFlash: config.enableTaskbarFlash !== false,
+      enableTrayFlash: config.enableTrayFlash !== false,
+      dndEnabled: config.dndEnabled === true,
+      dndStart: config.dndStart || '22:00',
+      dndEnd: config.dndEnd || '08:00',
     }
-    
+
     // 如果没有设置下载路径，使用默认的 Downloads 目录
     if (!localConfig.value.downloadPath) {
       const homeDir = await window.electronAPI.invoke('get:home-dir')
       localConfig.value.downloadPath = `${homeDir}\\Downloads`
     }
-    
+
     // 如果没有设置 userDataDir，显示当前实际使用的目录（受 HONGYAN_DATA_DIR 环境变量影响）
     if (!localConfig.value.userDataDir) {
       localConfig.value.userDataDir = await window.electronAPI.invoke('app:get-data-dir')
     }
-    
+
     // 加载网段配置
     if (config.scanSegments && Array.isArray(config.scanSegments)) {
       scanSegmentsText.value = config.scanSegments.join('\n')
@@ -272,6 +371,34 @@ async function saveConfig() {
   })
   configStore.nickname = localConfig.value.nickname
   configStore.avatar = localConfig.value.avatar
+}
+
+async function saveNotificationConfig() {
+  try {
+    const config = await window.electronAPI.invoke('config:get')
+    const newConfig = {
+      ...config,
+      closeToTray: localConfig.value.closeToTray,
+      enableNotifications: localConfig.value.enableNotifications,
+      enableTaskbarFlash: localConfig.value.enableTaskbarFlash,
+      enableTrayFlash: localConfig.value.enableTrayFlash,
+      dndEnabled: localConfig.value.dndEnabled,
+      dndStart: localConfig.value.dndStart,
+      dndEnd: localConfig.value.dndEnd,
+    }
+    await window.electronAPI.invoke('config:set', newConfig)
+    configStore.closeToTray = localConfig.value.closeToTray
+    configStore.enableNotifications = localConfig.value.enableNotifications
+    configStore.enableTaskbarFlash = localConfig.value.enableTaskbarFlash
+    configStore.enableTrayFlash = localConfig.value.enableTrayFlash
+    configStore.dndEnabled = localConfig.value.dndEnabled
+    configStore.dndStart = localConfig.value.dndStart
+    configStore.dndEnd = localConfig.value.dndEnd
+    alert('提醒设置已保存')
+  } catch (err) {
+    console.error('Failed to save notification config:', err)
+    alert('保存失败')
+  }
 }
 
 async function selectAvatar() {
@@ -647,6 +774,103 @@ function getInitials(name: string): string {
 /* 路径设置 */
 .path-setting {
   margin-bottom: 20px;
+}
+
+/* 开关样式 (V1.3.0) */
+.toggle-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+}
+
+.toggle-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.toggle-label label {
+  margin-bottom: 4px;
+  color: #333;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.toggle-label .path-hint {
+  display: block;
+  font-size: 12px;
+  color: #999;
+  margin-top: 2px;
+}
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 42px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch .slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #d9d9d9;
+  border-radius: 12px;
+  transition: background-color 0.2s;
+}
+
+.switch .slider::before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+.switch input:checked + .slider {
+  background-color: #07c160;
+}
+
+.switch input:checked + .slider::before {
+  transform: translateX(18px);
+}
+
+.dnd-row {
+  display: flex;
+  gap: 12px;
+}
+
+.dnd-field {
+  flex: 1;
+}
+
+.dnd-field input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.dnd-field input:focus {
+  outline: none;
+  border-color: #07c160;
 }
 
 .path-label-row {

@@ -288,6 +288,13 @@ export function registerIpcHandlers(): void {
     }
   })
 
+  // V1.3.0: 渲染端请求显示主窗口（用于从托盘通知点击唤起）
+  const { showMainWindow: showTrayWindow } = require('../tray')
+  const { getMainWindow } = require('../index')
+  ipcMain.handle('app:show-main-window', () => {
+    showTrayWindow(getMainWindow)
+  })
+
   log.info('IPC handlers registered')
 }
 

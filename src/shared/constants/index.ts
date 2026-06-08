@@ -56,3 +56,9 @@ export const CONFIG_FILE = 'identity.json'
 export const IDENTITY_KEY_FILE = 'identity.key'
 export const FILES_DIR = 'files'
 export const LOGS_DIR = 'logs'
+
+// V1.3.0 托盘图标资源名（位于 src/renderer/public/icons/，由 electron-vite 打包进 dist/renderer/icons/）
+// 主进程通过 __dirname + getTrayIconRelative() 解析到具体路径（dev 与 prod 分支见 tray.ts）
+export const TRAY_ICON_NORMAL = 'tray-normal.png'
+export const TRAY_ICON_ACTIVE = 'tray-active.png'
+export const TRAY_TOOLTIP = '鸿雁 HongYan'
