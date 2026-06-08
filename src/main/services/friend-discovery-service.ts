@@ -1,6 +1,7 @@
 import { udpBroadcaster } from '../network/udp-broadcaster'
 import { getTcpPort } from '../network/tcp-communication'
 import { parseCIDR } from '../network/network-utils'
+import { getConnectionEvents } from '../network/connection-manager'
 import { storageService } from '../storage/storage-service'
 import { pushFriendOnline, pushFriendOffline, pushFriendUpdated } from '../ipc/ipc-push'
 import type { IFriendDiscoveryService, Friend } from '@shared/types'
@@ -15,6 +16,11 @@ class FriendDiscoveryService implements IFriendDiscoveryService {
     const peerId = config?.peerId || ''
     const nickname = config?.nickname || 'User'
     const tcpPort = getTcpPort()
+    // V1.2.0: 应用用户配置的 heartbeat 间隔（默认 60s）
+    const heartbeat = config?.heartbeatIntervalMs
+    if (typeof heartbeat === 'number') {
+      udpBroadcaster.setHeartbeatInterval(heartbeat)
+    }
 
     udpBroadcaster.setCallbacks(
       (friend) => {
@@ -32,12 +38,23 @@ class FriendDiscoveryService implements IFriendDiscoveryService {
     )
 
     udpBroadcaster.start(peerId, nickname, tcpPort)
+
+    // V1.2.0: 订阅 TCP 连接断开事件，TCP 断开比 UDP 心跳超时更可靠
+    // 一旦 TCP 断开立即标记离线，不等 ONLINE_TIMEOUT_MS
+    getConnectionEvents().on('peer:disconnected', (peerId: string) => {
+      const friend = udpBroadcaster.getFriend(peerId)
+      if (friend && friend.online) {
+        log.info('TCP disconnected, marking friend offline immediately:', friend.nickname)
+        udpBroadcaster.markOffline(peerId)
+      }
+    })
+
     this.started = true
     log.info('Friend discovery service started')
   }
 
-  stop(): void {
-    udpBroadcaster.stop()
+  stop(opts: { graceful?: boolean } = {}): void {
+    udpBroadcaster.stop(opts)
     this.started = false
     log.info('Friend discovery service stopped')
   }
@@ -50,6 +67,20 @@ class FriendDiscoveryService implements IFriendDiscoveryService {
     udpBroadcaster.scanSegment(segment.broadcast)
     await new Promise((resolve) => setTimeout(resolve, 10000))
     return this.getFriends()
+  }
+
+  // V1.2.0: 手动触发一次 UDP 广播
+  refresh(): void {
+    udpBroadcaster.refresh()
+  }
+
+  // V1.2.0: 更新心跳间隔
+  setHeartbeatInterval(intervalMs: number): void {
+    udpBroadcaster.setHeartbeatInterval(intervalMs)
+  }
+
+  getHeartbeatInterval(): number {
+    return udpBroadcaster.getHeartbeatInterval()
   }
 
   getFriends(): Friend[] {

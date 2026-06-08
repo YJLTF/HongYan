@@ -19,13 +19,40 @@ export function getAppDataDir(): string {
 }
 
 export const BROADCAST_INTERVAL_MS = process.env.NODE_ENV === 'development' ? 5000 : 10000
+
+// V1.2.0：低频心跳仅作为"对方静默崩溃"的兜底检测；0 表示关闭
+// 事件驱动广播：上线/下线/昵称头像变更/手动刷新/消息发送失败 各自触发一次广播
+export const DEFAULT_HEARTBEAT_INTERVAL_MS = 60000
+// V1.2.0: ONLINE_TIMEOUT_MS 不再写死——必须 > heartbeat 间隔，否则必误判
+// 见 calculateOnlineTimeoutMs()。30s 是 V1.1.0 给 5-10s 周期广播设计的，
+// 配合 V1.2.0 的 60s 心跳会导致 B 反复离线-上线
 export const ONLINE_TIMEOUT_MS = 30000
 export const SCAN_TIMEOUT_MS = 10000
+
+// V1.2.0: 在线超时必须基于当前心跳间隔计算
+//   规则：timeout = max(30s, heartbeat * 2)，容忍一次心跳丢失 + 网络抖动
+//   heartbeat = 0（关闭）时给固定 60s 兜底（依赖 TCP 连接状态判活）
+//   用户改心跳间隔后必须重新计算
+export function calculateOnlineTimeoutMs(heartbeatMs: number): number {
+  if (heartbeatMs <= 0) {
+    return 60000
+  }
+  return Math.max(30000, heartbeatMs * 2)
+}
+// V1.2.0: signature 时间戳超过此值视为重放，丢弃
+export const SIGNATURE_MAX_AGE_MS = 300000
+
+export const ANNOUNCEMENT_KIND = {
+  PRESENCE: 'announcement',
+  LEAVING: 'announcement-leaving',
+} as const
 export const KEY_EXPIRY_MS = 3600000
 export const FILE_CHUNK_SIZE = 65536
 export const MAX_FILE_SIZE = 2147483648
 export const DB_NAME = 'hongyan.db'
 export const MASTER_KEY_FILE = 'master.key'
 export const CONFIG_FILE = 'identity.json'
+// V1.2.0: Ed25519 身份密钥文件（私钥用 master.key 加密后存储）
+export const IDENTITY_KEY_FILE = 'identity.key'
 export const FILES_DIR = 'files'
 export const LOGS_DIR = 'logs'

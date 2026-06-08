@@ -117,12 +117,12 @@
         <!-- 网段扫描配置 -->
         <section class="settings-section">
           <h4 class="section-title">网段扫描配置</h4>
-          
+
           <div class="setting-item">
             <label for="scan-segments">扫描网段（每行一个，支持 CIDR 格式）</label>
-            <textarea 
+            <textarea
               id="scan-segments"
-              v-model="scanSegmentsText" 
+              v-model="scanSegmentsText"
               placeholder="例如：&#10;192.168.1.0/24&#10;192.168.31.0/24&#10;10.0.0.0/24"
               rows="5"
               maxlength="500"
@@ -135,6 +135,44 @@
             <button class="btn-secondary" @click="refreshFriends" :disabled="isRefreshing">
               {{ isRefreshing ? '刷新中...' : '刷新好友' }}
             </button>
+          </div>
+        </section>
+
+        <!-- V1.2.0: UDP 广播配置 -->
+        <section class="settings-section">
+          <h4 class="section-title">UDP 广播配置</h4>
+
+          <div class="setting-item">
+            <label for="heartbeat-interval">低频心跳间隔</label>
+            <div class="select-wrapper">
+              <select
+                id="heartbeat-interval"
+                v-model="heartbeatPreset"
+                @change="onHeartbeatPresetChange"
+                class="select-input"
+              >
+                <option value="0">关闭（仅靠事件 + TCP 连接状态）</option>
+                <option value="30000">30 秒（最快响应）</option>
+                <option value="60000">60 秒（推荐）</option>
+                <option value="120000">2 分钟</option>
+                <option value="300000">5 分钟（最省流量）</option>
+              </select>
+              <svg
+                class="select-chevron"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </div>
+            <p class="help-text">心跳仅作为"对方静默崩溃"的兜底检测；正常情况仅在上线/下线/资料变更时广播</p>
           </div>
         </section>
 
@@ -180,6 +218,8 @@ const localConfig = ref<LocalConfig>({
 const scanSegmentsText = ref('')
 const isRefreshing = ref(false)
 const appVersion = ref('—')
+// V1.2.0: 心跳间隔预设（字符串键方便 v-model 绑定）
+const heartbeatPreset = ref('60000')
 
 onMounted(async () => {
   const config = await window.electronAPI.invoke('config:get')
@@ -217,6 +257,9 @@ onMounted(async () => {
   } catch (err) {
     console.error('Failed to get app version:', err)
   }
+
+  // V1.2.0: 加载心跳配置
+  heartbeatPreset.value = String(config?.heartbeatIntervalMs ?? 60000)
 })
 
 async function saveConfig() {
@@ -357,6 +400,21 @@ async function refreshFriends() {
     alert('刷新失败')
   } finally {
     isRefreshing.value = false
+  }
+}
+
+// V1.2.0: 心跳配置变更时持久化
+async function onHeartbeatPresetChange() {
+  const newVal = Number(heartbeatPreset.value)
+  try {
+    const config = await window.electronAPI.invoke('config:get')
+    await window.electronAPI.invoke('config:set', {
+      ...config,
+      heartbeatIntervalMs: newVal,
+    })
+  } catch (err) {
+    console.error('Failed to save heartbeat config:', err)
+    alert('保存失败')
   }
 }
 
@@ -696,6 +754,85 @@ function getInitials(name: string): string {
 
 #scan-segments:focus {
   border-color: #07c160;
+}
+
+/* V1.2.0: 自定义 select 包装 (匹配搜索框/输入框的现代风格) */
+.select-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.select-input {
+  width: 100%;
+  padding: 10px 38px 10px 14px;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  color: #333;
+  background: #fff;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+  /* 防止某些浏览器把首行 option 折叠时高度变化 */
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.select-input:hover {
+  border-color: #07c160;
+  background: #fafafa;
+}
+
+.select-input:focus,
+.select-input:focus-visible {
+  border-color: #07c160;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(7, 193, 96, 0.12);
+}
+
+.select-input:disabled {
+  background: #f5f5f5;
+  color: #999;
+  cursor: not-allowed;
+  border-color: #e8e8e8;
+  box-shadow: none;
+}
+
+.select-chevron {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #999;
+  pointer-events: none;
+  transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.select-wrapper:hover .select-chevron {
+  color: #07c160;
+}
+
+.select-input:focus ~ .select-chevron {
+  color: #07c160;
+}
+
+/* V1.2.0: 尝试美化下拉打开的 option 面板 (受限于浏览器，但能好看一点) */
+.select-input option {
+  padding: 8px 12px;
+  background: #fff;
+  color: #333;
+}
+
+.select-input option:checked {
+  background: linear-gradient(0deg, rgba(7, 193, 96, 0.08) 0%, rgba(7, 193, 96, 0.08) 100%), #fff;
+  color: #07c160;
+  font-weight: 500;
 }
 
 .segment-actions {

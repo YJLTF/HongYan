@@ -1,14 +1,19 @@
 import dgram from 'dgram'
-import { getUdpPort, BROADCAST_INTERVAL_MS, ONLINE_TIMEOUT_MS } from '@shared/constants'
+import {
+  getUdpPort,
+  ANNOUNCEMENT_KIND,
+  DEFAULT_HEARTBEAT_INTERVAL_MS,
+  SIGNATURE_MAX_AGE_MS,
+  calculateOnlineTimeoutMs,
+} from '@shared/constants'
 import { PROTOCOL_VERSION } from '@shared/types'
 import type { PresenceAnnouncement, Friend } from '@shared/types'
 import { storageService } from '../storage/storage-service'
 import { getNetworkInterfaces } from './network-utils'
+import { initIdentity, signPayload, verifyPayload } from '../crypto/identity'
 import log from 'electron-log'
 
 // 检测是否处于多实例/开发模式
-// 触发条件：HONGYAN_DATA_DIR 被设置（典型多实例测试场景）或 NODE_ENV=development
-// 多实例模式下不同实例绑定不同 UDP 端口，必须扫全端口 + 127.0.0.1 才能互相发现
 function isMultiInstanceMode(): boolean {
   return process.env.NODE_ENV === 'development' || !!process.env.HONGYAN_DATA_DIR
 }
@@ -20,14 +25,46 @@ function getScanUdpPorts(): number[] {
     : [getUdpPort()]
 }
 
+export type BroadcastReason =
+  | 'start'
+  | 'stop'
+  | 'self-info-changed'
+  | 'manual-refresh'
+  | 'send-failure'
+  | 'heartbeat'
+  | 'peer-response'
+
+// 接收方按版本分流处理：V1 (1) 是 V1.1.0 旧协议无签名；V2 (2) 是 V1.2.0 带签名
+const LEGACY_PROTOCOL_VERSION = 1
+const ACCEPTABLE_VERSIONS = new Set([LEGACY_PROTOCOL_VERSION, PROTOCOL_VERSION])
+
+// 签名载荷：announcement 中除 signature 本身外的所有字段
+// 公共字段包括 publicKey（用于验签），但 publicKey 不参与自签名（避免循环）
+type SignablePayload = {
+  version: number
+  peerId: string
+  nickname: string
+  ip: string
+  tcpPort: number
+  timestamp: number
+}
+
 class UdpBroadcaster {
   private socket: dgram.Socket | null = null
-  private timer: NodeJS.Timeout | null = null
+  private heartbeatTimer: NodeJS.Timeout | null = null
   private onlineCheckTimer: NodeJS.Timeout | null = null
   private friends = new Map<string, Friend>()
   private selfPeerId = ''
   private selfNickname = ''
   private selfTcpPort = 19877
+  private selfPublicKey: string = ''
+  private heartbeatIntervalMs: number = DEFAULT_HEARTBEAT_INTERVAL_MS
+  // V1.2.0: 在线超时动态跟随心跳间隔 (见 calculateOnlineTimeoutMs)
+  // 初始化为 60s heartbeat 对应的 120s 超时
+  private onlineTimeoutMs: number = calculateOnlineTimeoutMs(DEFAULT_HEARTBEAT_INTERVAL_MS)
+  private lastBroadcastAt = 0
+  private readonly minBroadcastGapMs = 200
+
   private onFriendOnline: ((friend: Friend) => void) | null = null
   private onFriendOffline: ((peerId: string) => void) | null = null
   private onFriendUpdated: ((friend: Friend) => void) | null = null
@@ -36,6 +73,17 @@ class UdpBroadcaster {
     this.selfPeerId = peerId
     this.selfNickname = nickname
     this.selfTcpPort = tcpPort
+
+    // V1.2.0: 初始化 Ed25519 身份密钥对（首次启动自动生成）
+    try {
+      const identity = initIdentity()
+      this.selfPublicKey = identity.publicKey
+      log.info('UDP broadcaster using publicKey:', this.selfPublicKey.slice(0, 16) + '...')
+    } catch (err) {
+      // 密钥初始化失败不应阻止 UDP 启动，只是无法签名
+      log.error('Failed to init identity, broadcasting will be unsigned:', err)
+      this.selfPublicKey = ''
+    }
 
     this.socket = dgram.createSocket('udp4')
     this.socket.on('message', (msg, rinfo) => {
@@ -49,38 +97,40 @@ class UdpBroadcaster {
     this.socket.bind(getUdpPort(), () => {
       if (this.socket) {
         this.socket.setBroadcast(true)
-        this.broadcastToCurrentSegment()
         log.info('UDP broadcaster started on port', getUdpPort())
       }
-
-      this.timer = setInterval(() => {
-        this.broadcastToCurrentSegment()
-      }, BROADCAST_INTERVAL_MS)
-
+      this.broadcastNow('start')
+      this.startHeartbeat()
       this.onlineCheckTimer = setInterval(() => {
         this.checkOnlineStatus()
-      }, ONLINE_TIMEOUT_MS / 2)
+      }, this.onlineTimeoutMs / 2)
     })
   }
 
-  stop(): void {
-    if (this.timer) {
-      clearInterval(this.timer)
-      this.timer = null
+  stop(opts: { graceful?: boolean } = {}): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer)
+      this.heartbeatTimer = null
     }
     if (this.onlineCheckTimer) {
       clearInterval(this.onlineCheckTimer)
       this.onlineCheckTimer = null
     }
-    if (this.socket) {
-      this.socket.close()
-      this.socket = null
+    if (opts.graceful) {
+      this.broadcastLeaving()
     }
-    log.info('UDP broadcaster stopped')
+    if (this.socket) {
+      this.socket.close(() => {
+        log.info('UDP broadcaster stopped')
+      })
+      this.socket = null
+    } else {
+      log.info('UDP broadcaster stopped')
+    }
   }
 
   scanSegment(broadcastAddress: string): void {
-    this.sendAnnouncement(broadcastAddress, true)
+    this.sendAnnouncement(broadcastAddress, true, ANNOUNCEMENT_KIND.PRESENCE, 'manual-refresh')
     log.info('Scanning segment via broadcast:', broadcastAddress)
   }
 
@@ -94,16 +144,39 @@ class UdpBroadcaster {
     this.onFriendUpdated = onUpdated ?? null
   }
 
-  // 允许运行时更新本地用户信息（如昵称修改后立即同步给在线好友）
   setSelfInfo(info: { peerId?: string; nickname?: string; tcpPort?: number }): void {
     if (info.peerId !== undefined) this.selfPeerId = info.peerId
     if (info.nickname !== undefined) this.selfNickname = info.nickname
     if (info.tcpPort !== undefined) this.selfTcpPort = info.tcpPort
-    // 立即广播一次，避免等到下一个 BROADCAST_INTERVAL_MS 周期
     if (this.socket) {
       log.info('Self info updated, broadcasting immediately:', this.selfNickname)
-      this.broadcastToCurrentSegment()
+      this.broadcastNow('self-info-changed')
     }
+  }
+
+  refresh(): void {
+    log.info('Manual refresh requested')
+    this.broadcastNow('manual-refresh')
+  }
+
+  broadcastLeaving(): void {
+    if (!this.socket) return
+    log.info('Broadcasting leaving announcement')
+    this.broadcastToCurrentSegment(ANNOUNCEMENT_KIND.LEAVING, 'stop')
+  }
+
+  setHeartbeatInterval(intervalMs: number): void {
+    this.heartbeatIntervalMs = intervalMs
+    // V1.2.0: 重新计算在线超时，必须 > 新心跳间隔否则误判
+    this.onlineTimeoutMs = calculateOnlineTimeoutMs(intervalMs)
+    log.info('Heartbeat interval set to', intervalMs, 'ms, online timeout:', this.onlineTimeoutMs, 'ms')
+    if (this.socket) {
+      this.restartHeartbeat()
+    }
+  }
+
+  getHeartbeatInterval(): number {
+    return this.heartbeatIntervalMs
   }
 
   getFriends(): Friend[] {
@@ -114,42 +187,103 @@ class UdpBroadcaster {
     return this.friends.get(peerId)
   }
 
-  private broadcastToCurrentSegment(): void {
+  // V1.2.0: 供外部模块强制标记好友离线
+  markOffline(peerId: string): void {
+    const friend = this.friends.get(peerId)
+    if (!friend || !friend.online) return
+    friend.online = false
+    this.friends.set(peerId, friend)
+    storageService.updateFriendOnlineStatus(peerId, false)
+    log.info('Friend marked offline externally:', friend.nickname, peerId)
+    this.onFriendOffline?.(peerId)
+  }
 
-    const segments = getNetworkInterfaces()
-    for (const seg of segments) {
-      this.sendAnnouncement(seg.broadcast, true)
+  // === 内部方法 ===
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat()
+    if (this.heartbeatIntervalMs <= 0) {
+      log.info('Heartbeat disabled (interval=0)')
+      return
+    }
+    this.heartbeatTimer = setInterval(() => {
+      this.broadcastNow('heartbeat')
+    }, this.heartbeatIntervalMs)
+    log.info('Heartbeat started, interval:', this.heartbeatIntervalMs, 'ms')
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer)
+      this.heartbeatTimer = null
     }
   }
 
-  private sendAnnouncement(broadcastAddress: string, scanAllPorts: boolean = false): void {
+  private restartHeartbeat(): void {
+    this.startHeartbeat()
+  }
+
+  private broadcastNow(reason: BroadcastReason): void {
     if (!this.socket) return
-    const announcement: PresenceAnnouncement = {
+    const now = Date.now()
+    if (now - this.lastBroadcastAt < this.minBroadcastGapMs) {
+      log.debug('Skipping duplicate broadcast, reason:', reason, 'gap:', now - this.lastBroadcastAt, 'ms')
+      return
+    }
+    this.lastBroadcastAt = now
+    log.debug('Broadcasting, reason:', reason)
+    this.broadcastToCurrentSegment(ANNOUNCEMENT_KIND.PRESENCE, reason)
+  }
+
+  private broadcastToCurrentSegment(kind: typeof ANNOUNCEMENT_KIND[keyof typeof ANNOUNCEMENT_KIND], reason: BroadcastReason): void {
+    const segments = getNetworkInterfaces()
+    for (const seg of segments) {
+      this.sendAnnouncement(seg.broadcast, true, kind, reason)
+    }
+  }
+
+  private sendAnnouncement(
+    broadcastAddress: string,
+    scanAllPorts: boolean,
+    kind: typeof ANNOUNCEMENT_KIND[keyof typeof ANNOUNCEMENT_KIND],
+    _reason: BroadcastReason
+  ): void {
+    if (!this.socket) return
+    const timestamp = Date.now()
+    const signable: SignablePayload = {
       version: PROTOCOL_VERSION,
       peerId: this.selfPeerId,
       nickname: this.selfNickname,
       ip: this.getOwnIp(),
       tcpPort: this.selfTcpPort,
-      timestamp: Date.now(),
+      timestamp,
     }
-    const msg = Buffer.from(JSON.stringify({ kind: 'announcement', data: announcement }), 'utf-8')
-    
+
+    const announcement: PresenceAnnouncement = { ...signable }
+    // V1.2.0: 对公告包进行 Ed25519 签名
+    if (this.selfPublicKey) {
+      try {
+        announcement.publicKey = this.selfPublicKey
+        announcement.signature = signPayload(signable as unknown as Record<string, unknown>)
+      } catch (err) {
+        log.warn('Failed to sign announcement, sending unsigned:', err)
+      }
+    }
+
+    const msg = Buffer.from(JSON.stringify({ kind, data: announcement }), 'utf-8')
+
     const ports = scanAllPorts ? getScanUdpPorts() : [getUdpPort()]
-    
-    // 避免重复发送：只发送到网段广播地址，不重复发送到 255.255.255.255 和 127.0.0.1
-    // 127.0.0.1 仅在开发模式发送用于本地测试
+
     const targets: Array<{ address: string; port: number }> = []
-    
     for (const port of ports) {
       targets.push({ address: broadcastAddress, port })
-
       if (isMultiInstanceMode()) {
         targets.push({ address: '127.0.0.1', port })
       }
     }
-    
-    log.debug('Sending announcement to', targets.length, 'targets')
-    
+
+    log.debug('Sending announcement to', targets.length, 'targets, kind:', kind)
+
     for (const target of targets) {
       this.socket.send(msg, 0, msg.length, target.port, target.address, (err) => {
         if (err) log.debug('Broadcast send error:', err)
@@ -162,10 +296,72 @@ class UdpBroadcaster {
       log.info('Received UDP message from', rinfo.address, 'port:', rinfo.port, 'size:', rinfo.size)
       const packet = JSON.parse(msg.toString('utf-8'))
       log.info('Packet kind:', packet.kind, 'peerId:', packet.data?.peerId)
-      if (packet.kind !== 'announcement') return
+      if (packet.kind !== ANNOUNCEMENT_KIND.PRESENCE && packet.kind !== ANNOUNCEMENT_KIND.LEAVING) return
       const announcement = packet.data as PresenceAnnouncement
-      if (announcement.version !== PROTOCOL_VERSION) return
+      // V1.2.0: 接受 V1 旧协议（无签名）和 V2 当前协议（有签名），拒绝未来未知版本
+      if (!ACCEPTABLE_VERSIONS.has(announcement.version)) {
+        log.warn('Dropping announcement with unsupported version:', announcement.version)
+        return
+      }
       if (announcement.peerId === this.selfPeerId) return
+
+      // 重放保护：检查 timestamp 是否在可接受窗口内
+      const now = Date.now()
+      if (Math.abs(now - announcement.timestamp) > SIGNATURE_MAX_AGE_MS) {
+        log.warn('Dropping announcement with stale timestamp, peerId:', announcement.peerId,
+          'skew:', Math.abs(now - announcement.timestamp), 'ms')
+        return
+      }
+
+      // 签名验证（V2 才有 signature，V1 跳过）
+      let signatureValid: boolean | null = null  // true/false/未签名(null)
+      if (announcement.version === PROTOCOL_VERSION) {
+        if (!announcement.publicKey || !announcement.signature) {
+          log.warn('V2 announcement missing signature/publicKey, peerId:', announcement.peerId)
+          return
+        }
+        // 提取签名字段（除 publicKey/signature 外的所有字段）
+        const { publicKey: _pk, signature: _sig, ...signable } = announcement
+        const ok = verifyPayload(
+          signable as unknown as Record<string, unknown>,
+          announcement.signature,
+          announcement.publicKey
+        )
+        if (!ok) {
+          log.warn('Signature verification FAILED, dropping packet from peerId:', announcement.peerId,
+            'claimed publicKey:', announcement.publicKey.slice(0, 16) + '...')
+          return
+        }
+        signatureValid = true
+      } else {
+        signatureValid = null  // 旧版未签名
+        log.info('Accepting legacy unsigned announcement from peerId:', announcement.peerId)
+      }
+
+      // 下线公告：立即标记离线，不等心跳超时
+      if (packet.kind === ANNOUNCEMENT_KIND.LEAVING) {
+        const existing = this.friends.get(announcement.peerId)
+        if (existing && existing.online) {
+          existing.online = false
+          this.friends.set(announcement.peerId, existing)
+          storageService.updateFriendOnlineStatus(announcement.peerId, false)
+          log.info('Friend announced leaving:', existing.nickname, announcement.peerId)
+          this.onFriendOffline?.(announcement.peerId)
+        }
+        return
+      }
+
+      // TOFU 信任链：已记录 peerId 的 publicKey 必须一致，否则可能是冒充
+      if (signatureValid === true) {
+        const known = storageService.getStoredPublicKey(announcement.peerId)
+        if (known && known !== announcement.publicKey) {
+          log.error('PublicKey mismatch for peerId:', announcement.peerId,
+            'known:', known.slice(0, 16) + '...',
+            'claimed:', (announcement.publicKey || '').slice(0, 16) + '...',
+            '— possible impersonation, dropping packet')
+          return
+        }
+      }
 
       const friend: Friend = {
         peerId: announcement.peerId,
@@ -174,6 +370,8 @@ class UdpBroadcaster {
         tcpPort: announcement.tcpPort,
         online: true,
         lastSeen: Date.now(),
+        publicKey: signatureValid === true ? announcement.publicKey : undefined,
+        untrusted: signatureValid === null,
       }
 
       const existing = this.friends.get(friend.peerId)
@@ -200,11 +398,19 @@ class UdpBroadcaster {
       storageService.saveFriend(toPersist)
 
       if (isNew || justCameOnline) {
-        log.info('Friend online:', toPersist.nickname, toPersist.ip)
+        log.info('Friend online:', toPersist.nickname, toPersist.ip, 'trusted:', !toPersist.untrusted)
         this.onFriendOnline?.(toPersist)
       } else if (infoChanged) {
         log.info('Friend info updated:', toPersist.peerId, 'nickname:', toPersist.nickname)
         this.onFriendUpdated?.(toPersist)
+      }
+
+      // V1.2.0: 双向发现
+      // 仅对"新发现"或"刚上线"的好友回播自己的公告，让对方也能立刻看到我们
+      // infoChanged 不回播（对方已经在我们列表里，且我们要的是对方信息，不是再次确认自己存在）
+      // 200ms minBroadcastGapMs 天然防回播死循环（A 收到 B 的回播后，因为已知 B，不会再触发回播）
+      if (isNew || justCameOnline) {
+        this.broadcastNow('peer-response')
       }
     } catch (err) {
       // ignore malformed packets
@@ -214,11 +420,11 @@ class UdpBroadcaster {
   private checkOnlineStatus(): void {
     const now = Date.now()
     for (const [peerId, friend] of this.friends) {
-      if (friend.online && now - friend.lastSeen > ONLINE_TIMEOUT_MS) {
+      if (friend.online && now - friend.lastSeen > this.onlineTimeoutMs) {
         friend.online = false
         this.friends.set(peerId, friend)
         storageService.updateFriendOnlineStatus(peerId, false)
-        log.info('Friend offline:', friend.nickname)
+        log.info('Friend offline (timeout):', friend.nickname, 'lastSeen:', new Date(friend.lastSeen).toISOString())
         this.onFriendOffline?.(peerId)
       }
     }

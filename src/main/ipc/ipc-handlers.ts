@@ -210,6 +210,10 @@ export function registerIpcHandlers(): void {
       peerId: config?.peerId,
       nickname: config?.nickname,
     })
+    // V1.2.0: 应用用户配置的心跳间隔
+    if (typeof config?.heartbeatIntervalMs === 'number') {
+      friendDiscoveryService.setHeartbeatInterval(config.heartbeatIntervalMs)
+    }
   })
 
   ipcMain.handle('friend:list', () => {
@@ -232,7 +236,7 @@ export function registerIpcHandlers(): void {
     try {
       const config = storageService.loadConfig()
       const scanSegments = config?.scanSegments || []
-      
+
       if (scanSegments.length > 0) {
         log.info(`Scanning configured segments: ${scanSegments.join(', ')}`)
         for (const cidr of scanSegments) {
@@ -243,10 +247,21 @@ export function registerIpcHandlers(): void {
           }
         }
       }
-      
+
       return { success: true }
     } catch (err) {
       log.error('Friend scan failed:', err)
+      return { error: (err as Error).message }
+    }
+  })
+
+  // V1.2.0: 手动触发一次 UDP 广播
+  ipcMain.handle('friend:refresh', () => {
+    try {
+      friendDiscoveryService.refresh()
+      return { success: true }
+    } catch (err) {
+      log.error('Friend refresh failed:', err)
       return { error: (err as Error).message }
     }
   })

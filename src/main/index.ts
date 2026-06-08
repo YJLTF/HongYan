@@ -11,6 +11,7 @@ import { messageService } from './services/message-service'
 import { fileTransferService } from './services/file-transfer-service'
 import { setPacketHandler, sendToPeer } from './network/connection-manager'
 import { hasPendingNegotiation } from './crypto/key-negotiation'
+import { clearIdentity } from './crypto/identity'
 import { createPacket } from './network/protocol'
 import { registerIpcHandlers } from './ipc/ipc-handlers'
 import { setMainWindow, pushFriendOnline, pushFriendOffline, pushMessageReceived, pushFileTransferRequest } from './ipc/ipc-push'
@@ -337,10 +338,12 @@ async function handleKeyNegotiation(packet: ProtocolPacket, peerIp: string): Pro
 
 async function shutdownApp(): Promise<void> {
   log.info('Shutting down HongYan...')
-  friendDiscoveryService.stop()
+  // V1.2.0: 优雅退出时广播下线公告，让好友立即知道本机已下线
+  friendDiscoveryService.stop({ graceful: true })
   stopTcpServer()
   closeDatabase()
   cryptoService.destroy()
+  clearIdentity()
   log.info('HongYan shutdown complete')
 }
 
