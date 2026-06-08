@@ -274,7 +274,7 @@
             <div class="about-info">
               <div class="about-logo">
                 <img
-                  src="icons/icon-256x256.png"
+                  :src="appIconUrl"
                   alt="鸿雁"
                   class="about-logo-img"
                   @error="logoLoadFailed = true"
@@ -298,6 +298,9 @@
 import { ref, onMounted } from 'vue'
 import { useConfigStore } from '../stores/config-store'
 import { useFriendStore } from '../stores/friend-store'
+// V1.3.0: 用 ?url 显式声明为 URL 资源，让 Vite 不把它当 JS 模块解析
+// public 目录下的资源在 dev 由 Vite dev server 提供，prod 拷贝到 dist 根
+import appIconUrl from '/icons/icon-256x256.png?url'
 
 const props = defineProps<{ visible: boolean }>()
 const emit = defineEmits(['close'])
