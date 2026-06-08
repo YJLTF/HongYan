@@ -274,14 +274,12 @@
             <div class="about-info">
               <div class="about-logo">
                 <img
-                  v-if="localConfig.avatar"
-                  :src="localConfig.avatar"
-                  alt="logo"
+                  src="icons/icon-256x256.png"
+                  alt="鸿雁"
                   class="about-logo-img"
+                  @error="logoLoadFailed = true"
                 />
-                <div v-else class="about-logo-placeholder">
-                  {{ getInitials(localConfig.nickname) }}
-                </div>
+                <div v-if="logoLoadFailed" class="about-logo-placeholder">鸿</div>
               </div>
               <p class="app-name">鸿雁 (HongYan)</p>
               <p class="version">版本 {{ appVersion }}</p>
@@ -372,6 +370,7 @@ const tabs: { key: TabKey; label: string; icon: string; badge?: boolean }[] = [
 const scanSegmentsText = ref('')
 const isRefreshing = ref(false)
 const appVersion = ref('—')
+const logoLoadFailed = ref(false)
 // V1.2.0: 心跳间隔预设（字符串键方便 v-model 绑定）
 const heartbeatPreset = ref('60000')
 
@@ -1105,24 +1104,39 @@ function getInitials(name: string): string {
 
 .about-logo {
   margin-bottom: 16px;
+  position: relative;
+  display: inline-block;
+}
+
+.about-logo::before {
+  content: '';
+  position: absolute;
+  inset: -10px;
+  background: linear-gradient(135deg, rgba(7, 193, 96, 0.08) 0%, rgba(102, 126, 234, 0.08) 100%);
+  border-radius: 26px;
+  z-index: 0;
 }
 
 .about-logo-img,
 .about-logo-placeholder {
-  width: 80px;
-  height: 80px;
-  border-radius: 18px;
+  position: relative;
+  z-index: 1;
+  width: 88px;
+  height: 88px;
+  border-radius: 20px;
   margin: 0 auto;
   object-fit: cover;
   display: block;
+  box-shadow: 0 6px 20px rgba(7, 193, 96, 0.15);
 }
 
 .about-logo-placeholder {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #07c160 0%, #10b981 100%);
   color: white;
-  font-size: 32px;
+  font-size: 40px;
   font-weight: 600;
-  line-height: 80px;
+  line-height: 88px;
+  text-align: center;
 }
 
 .app-name {
