@@ -245,6 +245,47 @@ onMounted(async () => {
     })
   )
 
+  // V1.3.0: 首次最小化到托盘时给用户一个 in-app 提示
+  cleanups.push(
+    window.electronAPI.on('app:minimized-to-tray', () => {
+      notificationRef.value?.showNotification(
+        'info',
+        '已最小化到系统托盘',
+        '窗口已隐藏到托盘，双击托盘图标或右键 → 显示主窗口 即可恢复',
+        undefined,
+        6000
+      )
+    })
+  )
+
+  // V1.3.0: 点击系统通知时，切换到对应聊天 / 传输列表
+  cleanups.push(
+    window.electronAPI.on('notification:click', (payload: any) => {
+      if (payload?.type === 'message' && payload.peerId) {
+        friendStore.selectFriend(payload.peerId)
+        currentView.value = 'chat'
+      } else if (payload?.type === 'file' && payload.transferId) {
+        currentView.value = 'transfers'
+      }
+    })
+  )
+
+  // V1.3.0: 启动时检查是否需要展示"已升级到 V1.3.0"的功能提示
+  // 仅在从未提示过且 closeToTray=true（默认）时展示一次
+  const TIP_KEY = 'hongyan.v1.3.0.feature-tip-shown'
+  if (!localStorage.getItem(TIP_KEY)) {
+    setTimeout(() => {
+      notificationRef.value?.showNotification(
+        'info',
+        'V1.3.0 已支持托盘和系统通知',
+        '关闭主窗口将自动隐藏到系统托盘（不再直接退出）。可在「设置 → 消息提醒」中调整横幅、任务栏闪烁、免打扰等行为。',
+        undefined,
+        8000
+      )
+      localStorage.setItem(TIP_KEY, '1')
+    }, 1500)
+  }
+
   watchSelectedFriend()
 })
 

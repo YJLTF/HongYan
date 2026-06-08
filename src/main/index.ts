@@ -1,6 +1,6 @@
 import path from 'path'
 import fs from 'fs'
-import { app, BrowserWindow, Menu } from 'electron'
+import { app, BrowserWindow, Menu, ipcMain } from 'electron'
 import log from 'electron-log'
 import { initDatabase, closeDatabase, getDefaultDataDir, getDataDir } from './storage/database'
 import { storageService } from './storage/storage-service'
@@ -14,7 +14,10 @@ import { hasPendingNegotiation } from './crypto/key-negotiation'
 import { clearIdentity } from './crypto/identity'
 import { createPacket } from './network/protocol'
 import { registerIpcHandlers } from './ipc/ipc-handlers'
-import { setMainWindow, pushFriendOnline, pushFriendOffline, pushMessageReceived, pushFileTransferRequest } from './ipc/ipc-push'
+import { setMainWindow, getMainWindow, pushFriendOnline, pushFriendOffline, pushMessageReceived, pushFileTransferRequest } from './ipc/ipc-push'
+import { createTray, destroyTray, showMainWindow as showTrayMainWindow } from './tray'
+import { initFlashManager, notify as flashNotify, attachFocusAutoClear } from './notifications/flash-manager'
+import { initNotificationManager, showMessage as notifMessage, showFileRequest as notifFileRequest } from './notifications/notification-manager'
 import type { AppConfig, ProtocolPacket, ChatRecord, FileTransferRecord } from '@shared/types'
 import { MessageType, MessageStatus, FileTransferStatus } from '@shared/types'
 import crypto from 'crypto'
@@ -23,7 +26,46 @@ import { FILES_DIR, LOGS_DIR, DB_NAME } from '@shared/constants'
 log.transports.file.level = 'info'
 log.transports.console.level = 'info'
 
+// V1.3.0: Windows Toast 通知需要 AppUserModelID，否则会归到 electron.exe 名下
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.hongyan.messenger')
+}
+
 let mainWindow: BrowserWindow | null = null
+let isQuitting = false
+let hasShownTrayTip = false
+
+/**
+ * V1.3.0: 拦截窗口 close 事件
+ * - 默认最小化到托盘（closeToTray=true），并在首次最小化时通过主进程推一条
+ *   「已最小化到托盘，双击托盘图标可恢复」提示给渲染端
+ * - 设置 closeToTray=false 时走原行为：close 直接销毁
+ */
+function attachCloseToTrayHandler(win: BrowserWindow): void {
+  win.on('close', (event) => {
+    if (isQuitting) return
+    const cfg = storageService.loadConfig()
+    const closeToTray = cfg?.closeToTray !== false // 默认 true
+    if (!closeToTray) return
+
+    event.preventDefault()
+    if (win.isMinimized()) {
+      // 已经最小化则保持隐藏即可
+      win.hide()
+    } else {
+      win.hide()
+    }
+    log.info('Main window hidden to tray (closeToTray=true)')
+
+    if (!hasShownTrayTip) {
+      hasShownTrayTip = true
+      // 给前端推一条「已最小化到托盘」提示
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('app:minimized-to-tray')
+      }
+    }
+  })
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -57,6 +99,8 @@ function createWindow(): void {
   }
 
   setMainWindow(mainWindow)
+  attachCloseToTrayHandler(mainWindow)
+  attachFocusAutoClear(mainWindow)
 
   mainWindow.on('closed', () => {
     mainWindow = null
@@ -131,6 +175,32 @@ async function initApp(): Promise<void> {
   log.info('Application menu setup')
 
   createWindow()
+  log.info('Application window created')
+
+  // V1.3.0 系统托盘
+  const tray = createTray(getMainWindow)
+  if (tray) {
+    log.info('System tray initialized')
+  } else {
+    log.warn('System tray NOT available (will run without tray)')
+  }
+
+  // V1.3.0 任务栏 / 托盘闪烁协调
+  initFlashManager(getMainWindow)
+  log.info('Flash manager initialized')
+
+  // V1.3.0 Windows Toast 通知
+  initNotificationManager(
+    getMainWindow,
+    path.join(
+      __dirname,
+      process.env.VITE_DEV_SERVER_URL
+        ? '../../src/renderer/public/icons/icon-256x256.png'
+        : '../renderer/icons/icon-256x256.png'
+    )
+  )
+  log.info('Notification manager initialized')
+
   log.info('Application started successfully')
 }
 
@@ -231,6 +301,13 @@ function handleIncomingPacket(packet: ProtocolPacket, peerIp: string): void {
               const msg = messageService.handleIncomingMessage(data, peerId)
               if (msg) {
                 pushMessageReceived(msg)
+                flashNotify('message')
+                const friend = friendDiscoveryService.getFriend(peerId)
+                notifMessage({
+                  peerId,
+                  senderName: friend?.remark || friend?.nickname || '未知好友',
+                  msg: { type: msg.type, content: msg.content, fileName: msg.fileName },
+                })
               }
             }
           } catch (err) {
@@ -240,6 +317,14 @@ function handleIncomingPacket(packet: ProtocolPacket, peerIp: string): void {
           const msg = messageService.handleIncomingMessage(data, extractPeerId(packet))
           if (msg) {
             pushMessageReceived(msg)
+            flashNotify('message')
+            const peerId = extractPeerId(packet)
+            const friend = friendDiscoveryService.getFriend(peerId)
+            notifMessage({
+              peerId,
+              senderName: friend?.remark || friend?.nickname || '未知好友',
+              msg: { type: msg.type, content: msg.content, fileName: msg.fileName },
+            })
           }
         }
         break
@@ -271,6 +356,15 @@ function handleIncomingPacket(packet: ProtocolPacket, peerIp: string): void {
 
           // 推送完整的 FileTransferRecord，让渲染端的传输列表能直接展示等待接受状态
           pushFileTransferRequest(fileTransferRecord)
+          flashNotify('file-request')
+          const friend = friendDiscoveryService.getFriend(peerId)
+          notifFileRequest({
+            peerId,
+            senderName: friend?.remark || friend?.nickname || '未知好友',
+            fileName: fileRequest.fileName,
+            fileSize: fileRequest.fileSize,
+            transferId: fileRequest.transferId,
+          })
 
           const chatRecord: ChatRecord = {
             id: fileRequest.transferId,
@@ -338,6 +432,8 @@ async function handleKeyNegotiation(packet: ProtocolPacket, peerIp: string): Pro
 
 async function shutdownApp(): Promise<void> {
   log.info('Shutting down HongYan...')
+  isQuitting = true
+  destroyTray()
   // V1.2.0: 优雅退出时广播下线公告，让好友立即知道本机已下线
   friendDiscoveryService.stop({ graceful: true })
   stopTcpServer()
@@ -352,12 +448,30 @@ app.whenReady().then(initApp).catch((err) => {
   app.quit()
 })
 
+// V1.3.0: 默认有托盘时即使所有窗口关闭也保持运行
+// 只有当用户明确退出（托盘菜单 / app.quit）时才真正退出
 app.on('window-all-closed', () => {
-  shutdownApp().then(() => {
-    app.quit()
-  })
+  // 故意不调用 app.quit() —— 让应用留在托盘
+  // shutdown 流程在 before-quit 中统一处理
+  log.info('All windows closed; staying alive in tray')
 })
 
-app.on('before-quit', () => {
-  shutdownApp()
+app.on('before-quit', async (event) => {
+  // 防止重入：如果正在退出，跳过
+  if (isQuitting) return
+  isQuitting = true
+  event.preventDefault()
+  try {
+    await shutdownApp()
+  } catch (err) {
+    log.error('Error during shutdown:', err)
+  } finally {
+    app.exit(0)
+  }
+})
+
+// 提供给渲染端调用的「真正退出」IPC（从设置页/托盘菜单的备用入口）
+ipcMain.handle('app:quit', () => {
+  log.info('Renderer requested app quit')
+  app.quit()
 })

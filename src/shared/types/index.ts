@@ -108,6 +108,14 @@ export interface AppConfig {
   downloadPath?: string   // 默认下载路径
   // V1.2.0：低频心跳间隔（ms），用于检测对方静默崩溃；0 = 完全关闭心跳
   heartbeatIntervalMs?: number
+  // V1.3.0 消息提醒相关配置
+  closeToTray?: boolean         // 关闭按钮是否最小化到托盘（默认 true）
+  enableNotifications?: boolean // 启用系统横幅通知（默认 true）
+  enableTaskbarFlash?: boolean  // 启用 Windows 任务栏闪烁（默认 true）
+  enableTrayFlash?: boolean     // 启用托盘图标闪烁（默认 true）
+  dndEnabled?: boolean          // 是否启用免打扰时段（默认 false）
+  dndStart?: string             // 免打扰起始时间 HH:mm（默认 '22:00'）
+  dndEnd?: string               // 免打扰结束时间 HH:mm（默认 '08:00'）
 }
 
 export interface EncryptedData {

@@ -8,6 +8,8 @@ import { fileTransferService } from '../services/file-transfer-service'
 import { storageService } from '../storage/storage-service'
 import { getDataDir } from '../storage/database'
 import { udpBroadcaster } from '../network/udp-broadcaster'
+import { showMainWindow as showTrayWindow } from '../tray'
+import { getMainWindow } from './ipc-push'
 import type {
   RendererToMainChannels,
   MainToRendererChannels,
@@ -286,6 +288,11 @@ export function registerIpcHandlers(): void {
       log.error('Mark messages as read failed:', err)
       return { error: (err as Error).message }
     }
+  })
+
+  // V1.3.0: 渲染端请求显示主窗口（用于从托盘通知点击唤起）
+  ipcMain.handle('app:show-main-window', () => {
+    showTrayWindow(getMainWindow)
   })
 
   log.info('IPC handlers registered')
