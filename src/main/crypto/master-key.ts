@@ -56,10 +56,21 @@ export function initMasterKey(): Buffer {
   if (fs.existsSync(keyPath)) {
     const encryptedKey = fs.readFileSync(keyPath)
     masterKey = decryptWithDPAPI(encryptedKey)
-    log.info('Master key loaded from disk')
+    // V1.2.0: 检测到 0 字节 master.key（V1.1.0 encryptWithDPAPI 偶发返回空 buffer 的 bug）
+    // HKDF 派生后虽然能用，但安全性严重下降（攻击者可推算）
+    if (masterKey.length === 0) {
+      log.error('!!! master.key is corrupt (0 bytes). V1.1.0 DPAPI bug.')
+      log.error('!!! Storage/identity encryption is using a deterministic insecure key.')
+      log.error('!!! Recommend: backup your data, then delete master.key and identity.key to regenerate.')
+    }
+    log.info('Master key loaded from disk, length:', masterKey.length, 'bytes')
   } else {
     masterKey = crypto.randomBytes(32)
     const encryptedKey = encryptWithDPAPI(masterKey)
+    // 防御性检查：拒绝写入空加密结果
+    if (encryptedKey.length === 0) {
+      throw new Error('DPAPI encryption returned empty buffer; refusing to write corrupt master.key')
+    }
     const dir = path.dirname(keyPath)
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true })

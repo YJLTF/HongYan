@@ -4,7 +4,7 @@ import path from 'path'
 import { app } from 'electron'
 import { getAppDataDir, IDENTITY_KEY_FILE } from '@shared/constants'
 import { encrypt, decrypt } from './aes-gcm'
-import { getMasterKey } from './master-key'
+import { deriveIdentityKey } from './key-derivation'
 import log from 'electron-log'
 
 // V1.2.0: 每个 peer 的长期 Ed25519 身份密钥对
@@ -61,8 +61,8 @@ export function initIdentity(): IdentityKeyPair {
         publicKey: string
         encryptedPrivateKey: { iv: string; ciphertext: string; tag: string; aad?: string }
       }
-      const masterKey = getMasterKey()
-      const privateKeyJson = decrypt(masterKey, raw.encryptedPrivateKey as any)
+      const identityKey = deriveIdentityKey()
+      const privateKeyJson = decrypt(identityKey, raw.encryptedPrivateKey as any)
       const parsed = JSON.parse(privateKeyJson) as { publicKey: string; privateKey: string }
       publicKeyB64 = parsed.publicKey
       privateKeyB64 = parsed.privateKey
@@ -94,9 +94,11 @@ function generateAndSave(): { publicKey: string; privateKey: string } {
   const publicKeyB64 = publicKey.export({ type: 'spki', format: 'der' }).toString('base64')
   const privateKeyB64 = privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64')
 
-  const masterKey = getMasterKey()
+  // V1.2.0: 用 HKDF 派生的 identity key 加密私钥，而非直接用 master key
+  // 这样即使 master.key 异常（如 0 字节），HKDF 也能输出标准 32 字节 key
+  const identityKey = deriveIdentityKey()
   const plainJson = JSON.stringify({ publicKey: publicKeyB64, privateKey: privateKeyB64 })
-  const encrypted = encrypt(masterKey, plainJson, 'identity-key')
+  const encrypted = encrypt(identityKey, plainJson, 'identity-key')
 
   const keyPath = getIdentityKeyPath()
   const dir = path.dirname(keyPath)
