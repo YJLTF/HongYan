@@ -49,3 +49,7 @@ export function pushFileCompleted(transferId: string): void {
 export function pushFileFailed(transferId: string, reason: string): void {
   pushEvent('file:failed', { transferId, reason })
 }
+
+export function pushFileUpdated(record: any): void {
+  pushEvent('file:updated', record)
+}

@@ -214,8 +214,13 @@ onMounted(async () => {
     })
   )
   cleanups.push(
+    window.electronAPI.on('file:updated', (record: any) => {
+      transferStore.addOrUpdateTransfer(record)
+    })
+  )
+  cleanups.push(
     window.electronAPI.on('file:transfer-request', (req: any) => {
-      transferStore.addTransfer(req)
+      transferStore.addOrUpdateTransfer(req)
     })
   )
   cleanups.push(

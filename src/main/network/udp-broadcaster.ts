@@ -1,15 +1,24 @@
 import dgram from 'dgram'
-import { UDP_PORT, BROADCAST_INTERVAL_MS, ONLINE_TIMEOUT_MS } from '@shared/constants'
+import { getUdpPort, BROADCAST_INTERVAL_MS, ONLINE_TIMEOUT_MS } from '@shared/constants'
 import { PROTOCOL_VERSION } from '@shared/types'
 import type { PresenceAnnouncement, Friend } from '@shared/types'
 import { storageService } from '../storage/storage-service'
 import { getNetworkInterfaces } from './network-utils'
 import log from 'electron-log'
 
-// 生产环境仅使用配置的单一端口，多端口仅用于开发测试
-const SCAN_UDP_PORTS = process.env.NODE_ENV === 'development' 
-  ? [19876, 19877, 19878, 19879, 19880]
-  : [UDP_PORT]
+// 检测是否处于多实例/开发模式
+// 触发条件：HONGYAN_DATA_DIR 被设置（典型多实例测试场景）或 NODE_ENV=development
+// 多实例模式下不同实例绑定不同 UDP 端口，必须扫全端口 + 127.0.0.1 才能互相发现
+function isMultiInstanceMode(): boolean {
+  return process.env.NODE_ENV === 'development' || !!process.env.HONGYAN_DATA_DIR
+}
+
+// 注意：每次调用时读取端口，避免在模块加载时 env var 尚未生效
+function getScanUdpPorts(): number[] {
+  return isMultiInstanceMode()
+    ? [19876, 19877, 19878, 19879, 19880]
+    : [getUdpPort()]
+}
 
 class UdpBroadcaster {
   private socket: dgram.Socket | null = null
@@ -37,11 +46,11 @@ class UdpBroadcaster {
       log.error('UDP socket error:', err)
     })
 
-    this.socket.bind(UDP_PORT, () => {
+    this.socket.bind(getUdpPort(), () => {
       if (this.socket) {
         this.socket.setBroadcast(true)
         this.broadcastToCurrentSegment()
-        log.info('UDP broadcaster started on port', UDP_PORT)
+        log.info('UDP broadcaster started on port', getUdpPort())
       }
 
       this.timer = setInterval(() => {
@@ -85,6 +94,18 @@ class UdpBroadcaster {
     this.onFriendUpdated = onUpdated ?? null
   }
 
+  // 允许运行时更新本地用户信息（如昵称修改后立即同步给在线好友）
+  setSelfInfo(info: { peerId?: string; nickname?: string; tcpPort?: number }): void {
+    if (info.peerId !== undefined) this.selfPeerId = info.peerId
+    if (info.nickname !== undefined) this.selfNickname = info.nickname
+    if (info.tcpPort !== undefined) this.selfTcpPort = info.tcpPort
+    // 立即广播一次，避免等到下一个 BROADCAST_INTERVAL_MS 周期
+    if (this.socket) {
+      log.info('Self info updated, broadcasting immediately:', this.selfNickname)
+      this.broadcastToCurrentSegment()
+    }
+  }
+
   getFriends(): Friend[] {
     return Array.from(this.friends.values())
   }
@@ -113,7 +134,7 @@ class UdpBroadcaster {
     }
     const msg = Buffer.from(JSON.stringify({ kind: 'announcement', data: announcement }), 'utf-8')
     
-    const ports = scanAllPorts ? SCAN_UDP_PORTS : [UDP_PORT]
+    const ports = scanAllPorts ? getScanUdpPorts() : [getUdpPort()]
     
     // 避免重复发送：只发送到网段广播地址，不重复发送到 255.255.255.255 和 127.0.0.1
     // 127.0.0.1 仅在开发模式发送用于本地测试
@@ -121,8 +142,8 @@ class UdpBroadcaster {
     
     for (const port of ports) {
       targets.push({ address: broadcastAddress, port })
-      
-      if (process.env.NODE_ENV === 'development') {
+
+      if (isMultiInstanceMode()) {
         targets.push({ address: '127.0.0.1', port })
       }
     }

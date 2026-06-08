@@ -213,6 +213,7 @@ export const MainToRendererChannels = {
   MESSAGE_STATUS_UPDATED: 'message:status-updated',
   FILE_TRANSFER_REQUEST: 'file:transfer-request',
   FILE_PROGRESS: 'file:progress',
+  FILE_UPDATED: 'file:updated',
   FILE_COMPLETED: 'file:completed',
   FILE_FAILED: 'file:failed',
 } as const

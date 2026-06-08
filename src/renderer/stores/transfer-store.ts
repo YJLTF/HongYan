@@ -16,6 +16,15 @@ export const useTransferStore = defineStore('transfer', () => {
     }
   }
 
+  function addOrUpdateTransfer(record: FileTransferRecord) {
+    const idx = transfers.value.findIndex(t => t.transferId === record.transferId)
+    if (idx >= 0) {
+      transfers.value[idx] = { ...transfers.value[idx], ...record }
+    } else {
+      transfers.value.push(record)
+    }
+  }
+
   function updateProgress(transferId: string, progress: number) {
     const t = transfers.value.find((t) => t.transferId === transferId)
     if (t) {
@@ -37,5 +46,5 @@ export const useTransferStore = defineStore('transfer', () => {
     }
   }
 
-  return { transfers, setTransfers, addTransfer, updateProgress, updateStatus, updateSavePath }
+  return { transfers, setTransfers, addTransfer, addOrUpdateTransfer, updateProgress, updateStatus, updateSavePath }
 })

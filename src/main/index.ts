@@ -93,6 +93,7 @@ function setupApplicationMenu(): void {
 
 async function initApp(): Promise<void> {
   log.info('Initializing HongYan...')
+  log.info('HONGYAN_DATA_DIR env:', process.env.HONGYAN_DATA_DIR || '(not set, using default)')
 
   // 先加载配置，获取 userDataDir 设置
   let config = storageService.loadConfig()
@@ -110,7 +111,6 @@ async function initApp(): Promise<void> {
 
   // 使用配置初始化数据库（传入 config 以确定数据目录）
   await initDatabase(config)
-  log.info('Database initialized')
 
   cryptoService.init(config.peerId)
   log.info('Crypto service initialized')
@@ -268,6 +268,9 @@ function handleIncomingPacket(packet: ProtocolPacket, peerIp: string): void {
           }
           storageService.saveFileTransfer(fileTransferRecord)
 
+          // 推送完整的 FileTransferRecord，让渲染端的传输列表能直接展示等待接受状态
+          pushFileTransferRequest(fileTransferRecord)
+
           const chatRecord: ChatRecord = {
             id: fileRequest.transferId,
             peerId,
@@ -281,7 +284,6 @@ function handleIncomingPacket(packet: ProtocolPacket, peerIp: string): void {
           }
           storageService.saveChatRecord(chatRecord)
           pushMessageReceived(chatRecord)
-          pushFileTransferRequest(fileRequest)
         } catch (err) {
           log.error('Failed to handle file request:', err)
         }

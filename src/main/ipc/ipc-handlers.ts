@@ -1,14 +1,52 @@
 import { ipcMain, BrowserWindow, dialog, app } from 'electron'
 import os from 'os'
+import path from 'path'
+import fs from 'fs'
 import { friendDiscoveryService } from '../services/friend-discovery-service'
 import { messageService } from '../services/message-service'
 import { fileTransferService } from '../services/file-transfer-service'
 import { storageService } from '../storage/storage-service'
+import { getDataDir } from '../storage/database'
+import { udpBroadcaster } from '../network/udp-broadcaster'
 import type {
   RendererToMainChannels,
   MainToRendererChannels,
 } from '@shared/types'
 import log from 'electron-log'
+
+// 读取应用版本号
+// 在 packaged build 中 app.getVersion() 直接返回 asar 中 package.json 的 version
+// 但在 dev/test 模式下（npx electron dist/main/index.js）Electron 可能找不到 app 自己的
+// package.json，app.getVersion() 会回退到 process.versions.electron
+// 因此先用 process.versions.electron 对比检测，命中则直接读 package.json 兜底
+function readAppVersion(): string {
+  try {
+    const v = app.getVersion()
+    if (v && v !== process.versions.electron) {
+      return v
+    }
+  } catch {
+    // ignore
+  }
+
+  const candidates = [
+    path.join(app.getAppPath(), 'package.json'),
+    path.join(__dirname, '../../package.json'),
+    path.join(__dirname, '../../../package.json'),
+    path.join(process.cwd(), 'package.json'),
+  ]
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) {
+        const pkg = JSON.parse(fs.readFileSync(p, 'utf-8')) as { version?: string }
+        if (pkg.version) return pkg.version
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+  return 'unknown'
+}
 
 export function registerIpcHandlers(): void {
   ipcMain.handle('friend:scan-segment', async (_event, cidr: string) => {
@@ -155,11 +193,23 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('app:get-version', () => {
-    return app.getVersion()
+    const v = readAppVersion()
+    log.info('App version requested:', v, 'electron:', process.versions.electron)
+    return v
+  })
+
+  // 返回当前实例真实使用的数据目录（已综合 HONGYAN_DATA_DIR 环境变量和配置中的 userDataDir）
+  ipcMain.handle('app:get-data-dir', () => {
+    return getDataDir(storageService.loadConfig() ?? undefined)
   })
 
   ipcMain.handle('config:set', (_event, config: any) => {
     storageService.saveConfig(config)
+    // 同步更新 UDP 广播中携带的本地用户信息，让其他好友能立即看到昵称变更
+    udpBroadcaster.setSelfInfo({
+      peerId: config?.peerId,
+      nickname: config?.nickname,
+    })
   })
 
   ipcMain.handle('friend:list', () => {

@@ -198,10 +198,9 @@ onMounted(async () => {
       localConfig.value.downloadPath = `${homeDir}\\Downloads`
     }
     
-    // 如果没有设置 userDataDir，显示当前使用的目录
+    // 如果没有设置 userDataDir，显示当前实际使用的目录（受 HONGYAN_DATA_DIR 环境变量影响）
     if (!localConfig.value.userDataDir) {
-      const homeDir = await window.electronAPI.invoke('get:home-dir')
-      localConfig.value.userDataDir = `${homeDir}\\AppData\\Roaming\\HongYan`
+      localConfig.value.userDataDir = await window.electronAPI.invoke('app:get-data-dir')
     }
     
     // 加载网段配置

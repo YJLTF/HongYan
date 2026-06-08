@@ -8,6 +8,7 @@ import { sendToPeer } from '../network/connection-manager'
 import { createPacket } from '../network/protocol'
 import { getDataDir } from '../storage/database'
 import { FILE_CHUNK_SIZE, MAX_FILE_SIZE, FILES_DIR } from '@shared/constants'
+import { pushFileProgress, pushFileCompleted, pushFileFailed, pushFileUpdated } from '../ipc/ipc-push'
 import type {
   IFileTransferService,
   FileTransferRecord,
@@ -20,7 +21,26 @@ import type {
 import { FileTransferStatus, MessageType, MessageStatus, PROTOCOL_VERSION } from '@shared/types'
 import log from 'electron-log'
 
-const activeTransfers = new Map<string, { readStream: fs.ReadStream; writeStream: fs.WriteStream | null }>()
+const activeTransfers = new Map<string, {
+  readStream: fs.ReadStream | null
+  writeStream: fs.WriteStream | null
+  receivedBytes: number
+  fileSize: number
+  lastPushedProgress: number
+  lastPushTime: number
+}>()
+
+// 限频：每个传输的进度推送间隔至少 PROGRESS_PUSH_INTERVAL_MS
+const PROGRESS_PUSH_INTERVAL_MS = 200
+// 进度变化超过此阈值时强制推送，避免小文件最后一帧被吞
+const PROGRESS_PUSH_DELTA = 0.5
+
+function shouldPushProgress(progress: number, lastPushed: number, lastPushTime: number): boolean {
+  if (progress >= 100) return true
+  if (progress - lastPushed >= PROGRESS_PUSH_DELTA) return true
+  if (Date.now() - lastPushTime >= PROGRESS_PUSH_INTERVAL_MS) return true
+  return false
+}
 
 class FileTransferService implements IFileTransferService {
   private selfPeerId(): string {
@@ -88,14 +108,20 @@ class FileTransferService implements IFileTransferService {
       transferId,
       peerId,
       direction: 'send',
-      fileName: storedFileName,  // 存储实际文件名（带 transferId 前缀）
+      fileName,  // 聊天记录中显示原始文件名
       fileSize: stat.size,
       status: FileTransferStatus.PENDING,
       progress: 0,
       md5,
       timestamp: Date.now(),
     }
-    storageService.saveFileTransfer(record)
+    storageService.saveFileTransfer({
+      ...record,
+      fileName: storedFileName,  // 持久化使用带前缀的物理文件名
+    })
+
+    // 通知渲染端加入传输列表（发送方 UI 也能立即看到记录）
+    pushFileUpdated(record)
 
     const chatRecord: ChatRecord = {
       id: transferId,
@@ -118,8 +144,10 @@ class FileTransferService implements IFileTransferService {
     const transfer = transfers.find((t) => t.transferId === transferId)
     if (!transfer) return
 
-    storageService.updateFileTransferStatus(transferId, FileTransferStatus.ACCEPTED)
+    // 立即标记为传输中、0% 进度，让接收方 UI 立刻出现进度条
+    storageService.updateFileTransferStatus(transferId, FileTransferStatus.TRANSFERRING, 0)
     storageService.updateFileTransferSavePath(transferId, savePath)
+    pushFileUpdated({ ...transfer, status: FileTransferStatus.TRANSFERRING, progress: 0, savePath })
 
     const accept: FileAcceptPacket = {
       version: PROTOCOL_VERSION,
@@ -132,7 +160,14 @@ class FileTransferService implements IFileTransferService {
       sendToPeer(friend, createPacket('file-accept', this.wrapEncrypted(transfer.peerId, encrypted))).catch(() => {})
 
       const writeStream = fs.createWriteStream(savePath)
-      activeTransfers.set(transferId, { readStream: null as any, writeStream })
+      activeTransfers.set(transferId, {
+        readStream: null,
+        writeStream,
+        receivedBytes: 0,
+        fileSize: transfer.fileSize,
+        lastPushedProgress: 0,
+        lastPushTime: 0,
+      })
     }
   }
 
@@ -142,6 +177,7 @@ class FileTransferService implements IFileTransferService {
     if (!transfer) return
 
     storageService.updateFileTransferStatus(transferId, FileTransferStatus.REJECTED)
+    pushFileUpdated({ ...transfer, status: FileTransferStatus.REJECTED })
 
     const reject: FileAcceptPacket = {
       version: PROTOCOL_VERSION,
@@ -168,6 +204,7 @@ class FileTransferService implements IFileTransferService {
 
     // 更新状态为中断
     storageService.updateFileTransferStatus(transferId, FileTransferStatus.INTERRUPTED)
+    pushFileUpdated({ transferId, status: FileTransferStatus.INTERRUPTED } as any)
   }
 
   getTransfers(): FileTransferRecord[] {
@@ -196,8 +233,18 @@ class FileTransferService implements IFileTransferService {
       const chunk = JSON.parse(decrypted) as FileChunkPacket
       const transfer = activeTransfers.get(chunk.transferId)
       if (transfer?.writeStream) {
-        const data = Buffer.from(chunk.data, 'base64')
-        transfer.writeStream.write(data)
+        const buf = Buffer.from(chunk.data, 'base64')
+        transfer.writeStream.write(buf)
+        transfer.receivedBytes += buf.length
+        if (transfer.fileSize > 0) {
+          const progress = (transfer.receivedBytes / transfer.fileSize) * 100
+          storageService.updateFileTransferStatus(chunk.transferId, FileTransferStatus.TRANSFERRING, progress)
+          if (shouldPushProgress(progress, transfer.lastPushedProgress, transfer.lastPushTime)) {
+            pushFileProgress(chunk.transferId, progress)
+            transfer.lastPushedProgress = progress
+            transfer.lastPushTime = Date.now()
+          }
+        }
       }
     } catch (err) {
       log.error('Failed to handle file chunk:', err)
@@ -215,6 +262,8 @@ class FileTransferService implements IFileTransferService {
         activeTransfers.delete(complete.transferId)
       }
       storageService.updateFileTransferStatus(complete.transferId, FileTransferStatus.COMPLETED, 100)
+      pushFileProgress(complete.transferId, 100)
+      pushFileCompleted(complete.transferId)
     } catch (err) {
       log.error('Failed to handle file complete:', err)
     }
@@ -237,13 +286,22 @@ class FileTransferService implements IFileTransferService {
     }
 
     const readStream = fs.createReadStream(filePath, { highWaterMark: FILE_CHUNK_SIZE })
-    
+
     // 保存 readStream 引用，以便取消时能关闭它
-    activeTransfers.set(transferId, { readStream, writeStream: null })
-    
+    activeTransfers.set(transferId, {
+      readStream,
+      writeStream: null,
+      receivedBytes: 0,
+      fileSize: transfer.fileSize,
+      lastPushedProgress: 0,
+      lastPushTime: 0,
+    })
+
     let sequence = 0
     const totalSize = transfer.fileSize
     let sentSize = 0
+    let lastPushedProgress = 0
+    let lastPushTime = 0
 
     readStream.on('data', (chunk: string | Buffer) => {
       if (typeof chunk === 'string') chunk = Buffer.from(chunk)
@@ -252,7 +310,7 @@ class FileTransferService implements IFileTransferService {
         readStream.destroy()
         return
       }
-      
+
       sequence++
       sentSize += chunk.length
       const progress = (sentSize / totalSize) * 100
@@ -268,6 +326,13 @@ class FileTransferService implements IFileTransferService {
       sendToPeer(friend, createPacket('file-chunk', this.wrapEncrypted(peerId, encrypted))).catch(() => {})
 
       storageService.updateFileTransferStatus(transferId, FileTransferStatus.TRANSFERRING, progress)
+
+      // 节流推送进度到渲染端，避免小文件分片过细导致 IPC 风暴
+      if (shouldPushProgress(progress, lastPushedProgress, lastPushTime)) {
+        pushFileProgress(transferId, progress)
+        lastPushedProgress = progress
+        lastPushTime = Date.now()
+      }
     })
 
     readStream.on('end', () => {
@@ -279,11 +344,14 @@ class FileTransferService implements IFileTransferService {
       const encrypted = cryptoService.encryptForTransmission(peerId, JSON.stringify(complete))
       sendToPeer(friend, createPacket('file-complete', this.wrapEncrypted(peerId, encrypted))).catch(() => {})
       storageService.updateFileTransferStatus(transferId, FileTransferStatus.COMPLETED, 100)
+      pushFileProgress(transferId, 100)
+      pushFileCompleted(transferId)
     })
 
     readStream.on('error', (err) => {
       log.error('File read error during transfer:', err)
       storageService.updateFileTransferStatus(transferId, FileTransferStatus.FAILED)
+      pushFileFailed(transferId, err.message)
     })
   }
 

@@ -2,13 +2,13 @@ import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { app } from 'electron'
-import { APP_DATA_DIR, MASTER_KEY_FILE } from '@shared/constants'
+import { getAppDataDir, MASTER_KEY_FILE } from '@shared/constants'
 import log from 'electron-log'
 
 let masterKey: Buffer | null = null
 
 function getMasterKeyPath(): string {
-  return path.join(app.getPath('appData'), APP_DATA_DIR, MASTER_KEY_FILE)
+  return path.join(app.getPath('appData'), getAppDataDir(), MASTER_KEY_FILE)
 }
 
 function encryptWithDPAPI(plaintext: Buffer): Buffer {

@@ -1,11 +1,12 @@
 import net from 'net'
-import { TCP_PORT_DEFAULT, TCP_PORT_MAX } from '@shared/constants'
+import { getTcpPortDefault, getTcpPortMax } from '@shared/constants'
 import { addConnection } from './connection-manager'
 import type { ProtocolPacket } from '@shared/types'
 import log from 'electron-log'
 
 let server: net.Server | null = null
-let actualPort = TCP_PORT_DEFAULT
+// initial value is overwritten in tryListen() before being read by getTcpPort()
+let actualPort = 0
 let onDataReceived: ((data: ProtocolPacket, peerIp: string) => void) | null = null
 
 function extractPeerIdFromPacket(packet: any): string {
@@ -55,7 +56,7 @@ export function startTcpServer(
     })
 
     function tryListen(port: number): void {
-      if (port > TCP_PORT_MAX) {
+      if (port > getTcpPortMax()) {
         reject(new Error('No available TCP port'))
         return
       }
@@ -74,7 +75,7 @@ export function startTcpServer(
       })
     }
 
-    tryListen(TCP_PORT_DEFAULT)
+    tryListen(getTcpPortDefault())
   })
 }
 

@@ -1,15 +1,19 @@
 import fs from 'fs'
 import path from 'path'
 import { app } from 'electron'
-import { APP_DATA_DIR, CONFIG_FILE } from '@shared/constants'
+import { getAppDataDir, CONFIG_FILE } from '@shared/constants'
 import type { AppConfig } from '@shared/types'
 import log from 'electron-log'
 
 // Config 文件始终存储在默认位置，userDataDir 只影响数据库等数据文件的位置
-const configPath = path.join(app.getPath('appData'), APP_DATA_DIR, CONFIG_FILE)
+// 每次调用时读取环境变量，避免在模块加载时 env var 尚未生效
+function getConfigPath(): string {
+  return path.join(app.getPath('appData'), getAppDataDir(), CONFIG_FILE)
+}
 
 export function loadConfig(): AppConfig | null {
   try {
+    const configPath = getConfigPath()
     if (fs.existsSync(configPath)) {
       const raw = fs.readFileSync(configPath, 'utf-8')
       return JSON.parse(raw) as AppConfig
@@ -23,6 +27,7 @@ export function loadConfig(): AppConfig | null {
 
 export function saveConfig(config: AppConfig): void {
   try {
+    const configPath = getConfigPath()
     const dir = path.dirname(configPath)
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true })

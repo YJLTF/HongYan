@@ -3,7 +3,7 @@ import fs from 'fs'
 import { app } from 'electron'
 import { Low } from 'lowdb'
 import { JSONFile } from 'lowdb/node'
-import { DB_NAME, APP_DATA_DIR, FILES_DIR, LOGS_DIR } from '@shared/constants'
+import { DB_NAME, getAppDataDir, FILES_DIR, LOGS_DIR } from '@shared/constants'
 import type { ChatRecord, Friend, FileTransferRecord, AppConfig } from '@shared/types'
 import log from 'electron-log'
 
@@ -24,11 +24,16 @@ export function getDatabase(): Low<DatabaseSchema> {
 
 // 获取默认数据目录（不依赖配置）
 export function getDefaultDataDir(): string {
-  return path.join(app.getPath('appData'), APP_DATA_DIR)
+  return path.join(app.getPath('appData'), getAppDataDir())
 }
 
 // 根据配置获取数据目录
+// 优先级：HONGYAN_DATA_DIR 环境变量 > config.userDataDir > 默认目录
+// 环境变量优先级最高，目的是支持多实例测试/dev 模式下的目录隔离
 export function getDataDir(config?: AppConfig): string {
+  if (process.env.HONGYAN_DATA_DIR) {
+    return path.join(app.getPath('appData'), process.env.HONGYAN_DATA_DIR)
+  }
   if (config?.userDataDir) {
     return config.userDataDir
   }
