@@ -8,6 +8,7 @@
 - **点对点加密通讯** - 使用 ECDH (x25519) 密钥协商 + AES-256-GCM 端到端加密，所有传输数据均加密
 - **广播包签名验证 (V1.2.0)** - Ed25519 身份密钥签名 UDP 公告包，防止局域网内任意设备伪造 peerId；TOFU 信任链自动识别冒充行为
 - **事件驱动广播 (V1.2.0)** - 仅在上线/下线/资料变更/手动刷新/消息发送失败时广播，配 60s 兜底心跳（可配置为关闭），流量较 V1.1.0 下降 8~12 倍
+- **双向发现 (V1.2.0)** - 点「刷新」后本机广播，**收到不认识的对方公告时自动回播一次**，让对方也能看到本机。200ms 合并间隔防回播死循环
 - **优雅下线通知 (V1.2.0)** - `announcement-leaving` 公告包使好友立即知道你已离线，不再等超时
 - **TCP 状态即时感知 (V1.2.0)** - TCP 连接断开立即标记好友离线，比 UDP 心跳更可靠
 - **消息收发** - 支持文字消息和图片消息
@@ -157,6 +158,18 @@ npm run package:nsis
 - 强制验签，签名失败丢弃
 - 已知 peerId 的 `publicKey` 与本次不一致 → 视为冒充，丢弃
 - 旧版 V1.1.0 (`version: 1`) 包按 legacy 接受，标记 `untrusted: true`
+
+### 广播触发汇总 (V1.2.0)
+
+| 触发 | 包类型 | 触发位置 |
+|---|---|---|
+| 应用启动 | `announcement` | `UdpBroadcaster.start()` |
+| 优雅退出 | `announcement-leaving` | `shutdownApp({graceful:true})` |
+| 昵称/头像修改 | `announcement` | `setSelfInfo()` |
+| 手动点「刷新」 | `announcement` | `friend:refresh` IPC → `refresh()` |
+| 消息发送失败 | `announcement` | `message-service.sendText/sendImage` catch |
+| 低频心跳 (默认 60s) | `announcement` | `startHeartbeat()` |
+| **收到新好友公告 (双向发现)** | `announcement` | `handleMessage()` 对 `isNew`/`justCameOnline` 触发回播 |
 
 ## 安全特性
 

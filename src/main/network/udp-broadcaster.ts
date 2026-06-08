@@ -32,6 +32,7 @@ export type BroadcastReason =
   | 'manual-refresh'
   | 'send-failure'
   | 'heartbeat'
+  | 'peer-response'
 
 // 接收方按版本分流处理：V1 (1) 是 V1.1.0 旧协议无签名；V2 (2) 是 V1.2.0 带签名
 const LEGACY_PROTOCOL_VERSION = 1
@@ -397,6 +398,14 @@ class UdpBroadcaster {
       } else if (infoChanged) {
         log.info('Friend info updated:', toPersist.peerId, 'nickname:', toPersist.nickname)
         this.onFriendUpdated?.(toPersist)
+      }
+
+      // V1.2.0: 双向发现
+      // 仅对"新发现"或"刚上线"的好友回播自己的公告，让对方也能立刻看到我们
+      // infoChanged 不回播（对方已经在我们列表里，且我们要的是对方信息，不是再次确认自己存在）
+      // 200ms minBroadcastGapMs 天然防回播死循环（A 收到 B 的回播后，因为已知 B，不会再触发回播）
+      if (isNew || justCameOnline) {
+        this.broadcastNow('peer-response')
       }
     } catch (err) {
       // ignore malformed packets
