@@ -16,6 +16,7 @@ import { createPacket } from './network/protocol'
 import { registerIpcHandlers } from './ipc/ipc-handlers'
 import { setMainWindow, pushFriendOnline, pushFriendOffline, pushMessageReceived, pushFileTransferRequest } from './ipc/ipc-push'
 import { createTray, destroyTray, showMainWindow as showTrayMainWindow } from './tray'
+import { initFlashManager, notify as flashNotify, attachFocusAutoClear } from './notifications/flash-manager'
 import type { AppConfig, ProtocolPacket, ChatRecord, FileTransferRecord } from '@shared/types'
 import { MessageType, MessageStatus, FileTransferStatus } from '@shared/types'
 import crypto from 'crypto'
@@ -99,6 +100,7 @@ function createWindow(): void {
 
   setMainWindow(mainWindow)
   attachCloseToTrayHandler(mainWindow)
+  attachFocusAutoClear(mainWindow)
 
   mainWindow.on('closed', () => {
     mainWindow = null
@@ -182,6 +184,10 @@ async function initApp(): Promise<void> {
   } else {
     log.warn('System tray NOT available (will run without tray)')
   }
+
+  // V1.3.0 任务栏 / 托盘闪烁协调
+  initFlashManager(getMainWindow)
+  log.info('Flash manager initialized')
 
   log.info('Application started successfully')
 }
@@ -283,6 +289,7 @@ function handleIncomingPacket(packet: ProtocolPacket, peerIp: string): void {
               const msg = messageService.handleIncomingMessage(data, peerId)
               if (msg) {
                 pushMessageReceived(msg)
+                flashNotify('message')
               }
             }
           } catch (err) {
@@ -292,6 +299,7 @@ function handleIncomingPacket(packet: ProtocolPacket, peerIp: string): void {
           const msg = messageService.handleIncomingMessage(data, extractPeerId(packet))
           if (msg) {
             pushMessageReceived(msg)
+            flashNotify('message')
           }
         }
         break
@@ -323,6 +331,7 @@ function handleIncomingPacket(packet: ProtocolPacket, peerIp: string): void {
 
           // 推送完整的 FileTransferRecord，让渲染端的传输列表能直接展示等待接受状态
           pushFileTransferRequest(fileTransferRecord)
+          flashNotify('file-request')
 
           const chatRecord: ChatRecord = {
             id: fileRequest.transferId,
