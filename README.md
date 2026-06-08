@@ -195,7 +195,8 @@ npm run package:nsis
 | `getTcpPortMax()` | `getTcpPortDefault() + 9` | TCP 端口范围上限 |
 | `getAppDataDir()` | `HongYan` | 数据目录名（可被 `HONGYAN_DATA_DIR` 覆盖） |
 | `DEFAULT_HEARTBEAT_INTERVAL_MS` | 60000 | V1.2.0 低频心跳兜底间隔（0=关闭） |
-| `ONLINE_TIMEOUT_MS` | 30000 | 在线超时（30 秒） |
+| `ONLINE_TIMEOUT_MS` | (deprecated) | V1.2.0 起改用 `calculateOnlineTimeoutMs(heartbeat)`，在线超时 = max(30s, heartbeat × 2) |
+| `calculateOnlineTimeoutMs()` | 函数 | V1.2.0 动态计算在线超时，必须 > 心跳间隔 |
 | `SIGNATURE_MAX_AGE_MS` | 300000 | V1.2.0 签名包允许的最大时间偏移（5 分钟） |
 | `KEY_EXPIRY_MS` | 3600000 | 密钥过期时间（1 小时） |
 | `FILE_CHUNK_SIZE` | 65536 | 文件分块大小（64 KB） |

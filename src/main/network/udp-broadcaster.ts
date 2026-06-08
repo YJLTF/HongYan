@@ -1,10 +1,10 @@
 import dgram from 'dgram'
 import {
   getUdpPort,
-  ONLINE_TIMEOUT_MS,
   ANNOUNCEMENT_KIND,
   DEFAULT_HEARTBEAT_INTERVAL_MS,
   SIGNATURE_MAX_AGE_MS,
+  calculateOnlineTimeoutMs,
 } from '@shared/constants'
 import { PROTOCOL_VERSION } from '@shared/types'
 import type { PresenceAnnouncement, Friend } from '@shared/types'
@@ -59,6 +59,9 @@ class UdpBroadcaster {
   private selfTcpPort = 19877
   private selfPublicKey: string = ''
   private heartbeatIntervalMs: number = DEFAULT_HEARTBEAT_INTERVAL_MS
+  // V1.2.0: 在线超时动态跟随心跳间隔 (见 calculateOnlineTimeoutMs)
+  // 初始化为 60s heartbeat 对应的 120s 超时
+  private onlineTimeoutMs: number = calculateOnlineTimeoutMs(DEFAULT_HEARTBEAT_INTERVAL_MS)
   private lastBroadcastAt = 0
   private readonly minBroadcastGapMs = 200
 
@@ -100,7 +103,7 @@ class UdpBroadcaster {
       this.startHeartbeat()
       this.onlineCheckTimer = setInterval(() => {
         this.checkOnlineStatus()
-      }, ONLINE_TIMEOUT_MS / 2)
+      }, this.onlineTimeoutMs / 2)
     })
   }
 
@@ -164,7 +167,9 @@ class UdpBroadcaster {
 
   setHeartbeatInterval(intervalMs: number): void {
     this.heartbeatIntervalMs = intervalMs
-    log.info('Heartbeat interval set to', intervalMs, 'ms')
+    // V1.2.0: 重新计算在线超时，必须 > 新心跳间隔否则误判
+    this.onlineTimeoutMs = calculateOnlineTimeoutMs(intervalMs)
+    log.info('Heartbeat interval set to', intervalMs, 'ms, online timeout:', this.onlineTimeoutMs, 'ms')
     if (this.socket) {
       this.restartHeartbeat()
     }
@@ -333,7 +338,7 @@ class UdpBroadcaster {
         log.info('Accepting legacy unsigned announcement from peerId:', announcement.peerId)
       }
 
-      // 下线公告：立即标记离线，不等 ONLINE_TIMEOUT_MS
+      // 下线公告：立即标记离线，不等心跳超时
       if (packet.kind === ANNOUNCEMENT_KIND.LEAVING) {
         const existing = this.friends.get(announcement.peerId)
         if (existing && existing.online) {
@@ -415,11 +420,11 @@ class UdpBroadcaster {
   private checkOnlineStatus(): void {
     const now = Date.now()
     for (const [peerId, friend] of this.friends) {
-      if (friend.online && now - friend.lastSeen > ONLINE_TIMEOUT_MS) {
+      if (friend.online && now - friend.lastSeen > this.onlineTimeoutMs) {
         friend.online = false
         this.friends.set(peerId, friend)
         storageService.updateFriendOnlineStatus(peerId, false)
-        log.info('Friend offline (timeout):', friend.nickname)
+        log.info('Friend offline (timeout):', friend.nickname, 'lastSeen:', new Date(friend.lastSeen).toISOString())
         this.onFriendOffline?.(peerId)
       }
     }
