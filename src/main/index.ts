@@ -17,6 +17,7 @@ import { registerIpcHandlers } from './ipc/ipc-handlers'
 import { setMainWindow, pushFriendOnline, pushFriendOffline, pushMessageReceived, pushFileTransferRequest } from './ipc/ipc-push'
 import { createTray, destroyTray, showMainWindow as showTrayMainWindow } from './tray'
 import { initFlashManager, notify as flashNotify, attachFocusAutoClear } from './notifications/flash-manager'
+import { initNotificationManager, showMessage as notifMessage, showFileRequest as notifFileRequest } from './notifications/notification-manager'
 import type { AppConfig, ProtocolPacket, ChatRecord, FileTransferRecord } from '@shared/types'
 import { MessageType, MessageStatus, FileTransferStatus } from '@shared/types'
 import crypto from 'crypto'
@@ -24,6 +25,11 @@ import { FILES_DIR, LOGS_DIR, DB_NAME } from '@shared/constants'
 
 log.transports.file.level = 'info'
 log.transports.console.level = 'info'
+
+// V1.3.0: Windows Toast 通知需要 AppUserModelID，否则会归到 electron.exe 名下
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.hongyan.messenger')
+}
 
 let mainWindow: BrowserWindow | null = null
 let isQuitting = false
@@ -189,6 +195,18 @@ async function initApp(): Promise<void> {
   initFlashManager(getMainWindow)
   log.info('Flash manager initialized')
 
+  // V1.3.0 Windows Toast 通知
+  initNotificationManager(
+    getMainWindow,
+    path.join(
+      __dirname,
+      process.env.VITE_DEV_SERVER_URL
+        ? '../../src/renderer/public/icons/icon-256x256.png'
+        : '../renderer/icons/icon-256x256.png'
+    )
+  )
+  log.info('Notification manager initialized')
+
   log.info('Application started successfully')
 }
 
@@ -290,6 +308,12 @@ function handleIncomingPacket(packet: ProtocolPacket, peerIp: string): void {
               if (msg) {
                 pushMessageReceived(msg)
                 flashNotify('message')
+                const friend = friendDiscoveryService.getFriend(peerId)
+                notifMessage({
+                  peerId,
+                  senderName: friend?.remark || friend?.nickname || '未知好友',
+                  msg: { type: msg.type, content: msg.content, fileName: msg.fileName },
+                })
               }
             }
           } catch (err) {
@@ -300,6 +324,13 @@ function handleIncomingPacket(packet: ProtocolPacket, peerIp: string): void {
           if (msg) {
             pushMessageReceived(msg)
             flashNotify('message')
+            const peerId = extractPeerId(packet)
+            const friend = friendDiscoveryService.getFriend(peerId)
+            notifMessage({
+              peerId,
+              senderName: friend?.remark || friend?.nickname || '未知好友',
+              msg: { type: msg.type, content: msg.content, fileName: msg.fileName },
+            })
           }
         }
         break
@@ -332,6 +363,14 @@ function handleIncomingPacket(packet: ProtocolPacket, peerIp: string): void {
           // 推送完整的 FileTransferRecord，让渲染端的传输列表能直接展示等待接受状态
           pushFileTransferRequest(fileTransferRecord)
           flashNotify('file-request')
+          const friend = friendDiscoveryService.getFriend(peerId)
+          notifFileRequest({
+            peerId,
+            senderName: friend?.remark || friend?.nickname || '未知好友',
+            fileName: fileRequest.fileName,
+            fileSize: fileRequest.fileSize,
+            transferId: fileRequest.transferId,
+          })
 
           const chatRecord: ChatRecord = {
             id: fileRequest.transferId,

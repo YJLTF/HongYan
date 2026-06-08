@@ -258,6 +258,18 @@ onMounted(async () => {
     })
   )
 
+  // V1.3.0: 点击系统通知时，切换到对应聊天 / 传输列表
+  cleanups.push(
+    window.electronAPI.on('notification:click', (payload: any) => {
+      if (payload?.type === 'message' && payload.peerId) {
+        friendStore.selectFriend(payload.peerId)
+        currentView.value = 'chat'
+      } else if (payload?.type === 'file' && payload.transferId) {
+        currentView.value = 'transfers'
+      }
+    })
+  )
+
   watchSelectedFriend()
 })
 
