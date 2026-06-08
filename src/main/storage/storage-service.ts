@@ -93,6 +93,13 @@ class StorageService implements IStorageService {
     return [...db.data.friends]
   }
 
+  // V1.2.0: TOFU 信任链查询
+  getStoredPublicKey(peerId: string): string | undefined {
+    const db = getDatabase()
+    const friend = db.data.friends.find(f => f.peerId === peerId)
+    return friend?.publicKey
+  }
+
   updateFriendOnlineStatus(peerId: string, online: boolean): void {
     const db = getDatabase()
     const friend = db.data.friends.find(f => f.peerId === peerId)

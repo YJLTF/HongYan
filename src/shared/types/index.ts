@@ -29,6 +29,11 @@ export interface PresenceAnnouncement {
   ip: string
   tcpPort: number
   timestamp: number
+  // V1.2.0: UDP 广播包签名（防伪造）
+  // publicKey 暴露给接收方用于验签；signature 是对其他所有字段的 Ed25519 签名
+  // 旧版 V1.1.0 客户端不发送这两个字段，V1.2.0 接收时按 legacy 处理
+  publicKey?: string
+  signature?: string
 }
 
 export interface Friend {
@@ -40,6 +45,10 @@ export interface Friend {
   tcpPort: number
   online: boolean
   lastSeen: number
+  // V1.2.0: 持久化对方公钥用于 TOFU 信任链
+  publicKey?: string
+  // V1.2.0: 标记签名不可验证的旧版客户端（warning 但不阻止）
+  untrusted?: boolean
 }
 
 export interface NetworkSegment {
@@ -200,6 +209,8 @@ export interface IStorageService {
   saveFriend(friend: Friend): void
   queryFriends(): Friend[]
   updateFriendOnlineStatus(peerId: string, online: boolean): void
+  // V1.2.0: TOFU 信任链：根据 peerId 查询已持久化的公钥
+  getStoredPublicKey(peerId: string): string | undefined
   saveFileTransfer(record: FileTransferRecord): void
   updateFileTransferStatus(transferId: string, status: FileTransferStatus, progress?: number): void
   queryFileTransfers(peerId?: string): FileTransferRecord[]
@@ -233,4 +244,4 @@ export const RendererToMainChannels = {
   CONFIG_SET: 'config:set',
 } as const
 
-export const PROTOCOL_VERSION = 1
+export const PROTOCOL_VERSION = 2

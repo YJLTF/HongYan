@@ -25,6 +25,8 @@ export const BROADCAST_INTERVAL_MS = process.env.NODE_ENV === 'development' ? 50
 export const DEFAULT_HEARTBEAT_INTERVAL_MS = 60000
 export const ONLINE_TIMEOUT_MS = 30000
 export const SCAN_TIMEOUT_MS = 10000
+// V1.2.0: signature 时间戳超过此值视为重放，丢弃
+export const SIGNATURE_MAX_AGE_MS = 300000
 
 export const ANNOUNCEMENT_KIND = {
   PRESENCE: 'announcement',
@@ -36,5 +38,7 @@ export const MAX_FILE_SIZE = 2147483648
 export const DB_NAME = 'hongyan.db'
 export const MASTER_KEY_FILE = 'master.key'
 export const CONFIG_FILE = 'identity.json'
+// V1.2.0: Ed25519 身份密钥文件（私钥用 master.key 加密后存储）
+export const IDENTITY_KEY_FILE = 'identity.key'
 export const FILES_DIR = 'files'
 export const LOGS_DIR = 'logs'
