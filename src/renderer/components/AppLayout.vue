@@ -9,31 +9,40 @@
         </div>
       </div>
       <nav class="nav-menu">
-        <button 
-          class="nav-item" 
+        <button
+          class="nav-item"
           :class="{ active: currentView === 'chat' }"
-          title="聊天"
+          title="私聊"
           @click="currentView = 'chat'"
         >
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
           </svg>
         </button>
-        <button 
-          class="nav-item" 
+        <!-- V1.4.0: 群聊（3 人头图标） -->
+        <button
+          class="nav-item"
+          :class="{ active: currentView === 'groups' }"
+          title="群聊"
+          @click="currentView = 'groups'"
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+          </svg>
+        </button>
+        <button
+          class="nav-item"
           :class="{ active: currentView === 'contacts' }"
           title="联系人"
           @click="currentView = 'contacts'"
         >
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-            <circle cx="9" cy="7" r="4"/>
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
           </svg>
         </button>
-        <button 
-          class="nav-item" 
+        <button
+          class="nav-item"
           :class="{ active: currentView === 'transfers' }"
           title="文件传输"
           @click="currentView = 'transfers'"
@@ -85,10 +94,21 @@
           </button>
         </div>
       </div>
-      <FriendList 
+      <FriendList
         :friends="filteredFriends"
         :selectedPeerId="friendStore.selectedPeerId"
         @selectFriend="handleSelectFriend"
+      />
+    </div>
+
+    <!-- V1.4.0: 群聊列表区域 -->
+    <div class="friend-sidebar" v-else-if="currentView === 'groups'">
+      <GroupList
+        :groups="groupStore.groups"
+        :selectedGroupId="groupStore.selectedGroupId"
+        :lastMessages="{}"
+        @selectGroup="handleSelectGroup"
+        @groupCreated="handleGroupCreated"
       />
     </div>
 
@@ -102,7 +122,11 @@
         @viewImage="handleViewImage"
         @openContacts="switchToContacts"
       />
-      <ContactsView 
+      <GroupChatView
+        v-else-if="currentView === 'groups'"
+        @viewImage="handleViewImage"
+      />
+      <ContactsView
         v-else-if="currentView === 'contacts'"
         @openChat="switchToChat"
       />
@@ -116,6 +140,53 @@
       :imageData="currentImageData" 
       @close="showImageViewer = false" 
     />
+
+    <!-- V1.4.0: 群邀请提示对话框 -->
+    <div v-if="groupStore.pendingInvites.length > 0" class="invite-banner" @click="handleInviteBannerClick">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+        <circle cx="9" cy="7" r="4"/>
+        <line x1="20" y1="8" x2="20" y2="14"/>
+        <line x1="23" y1="11" x2="17" y2="11"/>
+      </svg>
+      <span>{{ groupStore.pendingInvites[0].inviterNickname }} 邀请你加入群「{{ groupStore.pendingInvites[0].groupName }}」</span>
+    </div>
+
+    <!-- V1.4.0: 群邀请详情对话框 -->
+    <div v-if="showInviteDialog" class="modal-overlay" @click.self="showInviteDialog = false">
+      <div class="invite-confirm-dialog">
+        <div class="dialog-header">
+          <h3>群聊邀请</h3>
+          <button class="close-btn" @click="showInviteDialog = false">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+        <div class="dialog-body">
+          <div class="invite-info">
+            <div class="invite-avatar">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+              </svg>
+            </div>
+            <div class="invite-text">
+              <div class="invite-name">{{ activeInvite?.groupName }}</div>
+              <div class="invite-from">邀请人：{{ activeInvite?.inviterNickname }}</div>
+            </div>
+          </div>
+          <div class="invite-hint">
+            接受邀请后将自动加入该群聊
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button class="btn-cancel" @click="respondActiveInvite(false)">拒绝</button>
+          <button class="btn-accept" @click="respondActiveInvite(true)">接受</button>
+        </div>
+      </div>
+    </div>
 
     <!-- 通知提示 -->
     <NotificationToast ref="notificationRef" />
@@ -136,8 +207,11 @@ import { useFriendStore } from '../stores/friend-store'
 import { useChatStore } from '../stores/chat-store'
 import { useTransferStore } from '../stores/transfer-store'
 import { useConfigStore } from '../stores/config-store'
+import { useGroupStore, type PendingInvite } from '../stores/group-store'
 import FriendList from './FriendList.vue'
 import ChatView from './ChatView.vue'
+import GroupList from './GroupList.vue'
+import GroupChatView from './GroupChatView.vue'
 import ContactsView from './ContactsView.vue'
 import SettingsView from './SettingsView.vue'
 import FileTransferView from './FileTransferView.vue'
@@ -149,13 +223,16 @@ const friendStore = useFriendStore()
 const chatStore = useChatStore()
 const transferStore = useTransferStore()
 const configStore = useConfigStore()
+const groupStore = useGroupStore()
 
 const notificationRef = ref<any>(null)
 
-const currentView = ref<'chat' | 'contacts' | 'transfers'>('chat')
+const currentView = ref<'chat' | 'groups' | 'contacts' | 'transfers'>('chat')
 const showSettings = ref(false)
 const showImageViewer = ref(false)
 const showScanConfig = ref(false)
+const showInviteDialog = ref(false)
+const activeInvite = ref<PendingInvite | null>(null)
 const currentImageData = ref('')
 const searchQuery = ref('')
 const isRefreshing = ref(false)
@@ -187,6 +264,14 @@ onMounted(async () => {
     const transfers = await window.electronAPI.invoke('file:list-transfers')
     if (Array.isArray(transfers)) {
       transferStore.setTransfers(transfers)
+    }
+  } catch (_) {}
+
+  // V1.4.0: 加载群组列表
+  try {
+    const groupResult = await window.electronAPI.invoke('group:list')
+    if (groupResult?.groups) {
+      groupStore.setGroups(groupResult.groups)
     }
   } catch (_) {}
 
@@ -264,9 +349,72 @@ onMounted(async () => {
       if (payload?.type === 'message' && payload.peerId) {
         friendStore.selectFriend(payload.peerId)
         currentView.value = 'chat'
+      } else if (payload?.type === 'group-message' && payload.groupId) {
+        groupStore.selectGroup(payload.groupId)
+        currentView.value = 'groups'
       } else if (payload?.type === 'file' && payload.transferId) {
         currentView.value = 'transfers'
       }
+    })
+  )
+
+  // V1.4.0: 群事件监听
+  cleanups.push(
+    window.electronAPI.on('group:created', (group: any) => {
+      groupStore.addOrUpdateGroup(group)
+    })
+  )
+  cleanups.push(
+    window.electronAPI.on('group:updated', (group: any) => {
+      groupStore.addOrUpdateGroup(group)
+    })
+  )
+  cleanups.push(
+    window.electronAPI.on('group:dissolved', (payload: any) => {
+      groupStore.removeGroup(payload.groupId)
+    })
+  )
+  cleanups.push(
+    window.electronAPI.on('group:invite-received', (invite: any) => {
+      groupStore.addPendingInvite({
+        groupId: invite.groupId,
+        groupName: invite.groupName,
+        inviterPeerId: invite.inviterPeerId,
+        inviterNickname: invite.inviterNickname,
+        keyVersion: invite.keyVersion,
+        timestamp: invite.timestamp,
+      })
+    })
+  )
+  cleanups.push(
+    window.electronAPI.on('group:invite-responded', (_payload: any) => {
+      // 通知 owner 某人接受/拒绝了邀请（仅日志用，无需 UI 动作）
+    })
+  )
+  cleanups.push(
+    window.electronAPI.on('group:member-changed', (_payload: any) => {
+      // 重新拉取群组以更新成员列表
+      window.electronAPI.invoke('group:list').then((r: any) => {
+        if (r?.groups) groupStore.setGroups(r.groups)
+      })
+    })
+  )
+  cleanups.push(
+    window.electronAPI.on('group:message-received', async (msg: any) => {
+      const groupId = msg.groupId
+      if (groupId === groupStore.selectedGroupId) {
+        const refreshed = await window.electronAPI.invoke('group:load-history', groupId)
+        if (refreshed?.records) {
+          groupStore.setMessages(groupId, refreshed.records)
+        }
+      } else {
+        groupStore.incrementUnread(groupId)
+      }
+    })
+  )
+  cleanups.push(
+    window.electronAPI.on('group:message-status-updated', (data: any) => {
+      groupStore.updateMessageStatus(data.messageId, data.status)
     })
   )
 
@@ -306,10 +454,68 @@ async function watchSelectedFriend() {
       }
     }
   )
+  // V1.4.0: 监听选中群变化
+  watch(
+    () => groupStore.selectedGroupId,
+    async (groupId) => {
+      if (groupId) {
+        const records = await window.electronAPI.invoke('group:load-history', groupId)
+        if (records?.records) {
+          groupStore.setMessages(groupId, records.records)
+        }
+      } else {
+        groupStore.clearMessages()
+      }
+    }
+  )
 }
 
 function handleSelectFriend(peerId: string) {
   friendStore.selectFriend(peerId)
+}
+
+// V1.4.0: 选中群
+function handleSelectGroup(groupId: string) {
+  groupStore.selectGroup(groupId)
+  groupStore.setMessages(groupId, []) // 立即清空，加载完成前先空
+}
+
+function handleGroupCreated(_group: any) {
+  // 重新拉取群列表
+  window.electronAPI.invoke('group:list').then((r: any) => {
+    if (r?.groups) {
+      groupStore.setGroups(r.groups)
+      const created = r.groups[0]
+      if (created) groupStore.selectGroup(created.groupId)
+    }
+  })
+}
+
+// V1.4.0: 群邀请横幅点击
+function handleInviteBannerClick() {
+  if (groupStore.pendingInvites.length === 0) return
+  activeInvite.value = groupStore.pendingInvites[0]
+  showInviteDialog.value = true
+}
+
+// V1.4.0: 接受/拒绝群邀请
+async function respondActiveInvite(accept: boolean) {
+  if (!activeInvite.value) return
+  const invite = activeInvite.value
+  const inviterPeerId = invite.inviterPeerId
+  const groupId = invite.groupId
+
+  // 先建立本地空群占位（如果接受），让用户能进入群视图看到成员列表
+  if (accept) {
+    // 主进程会处理密钥分发与本地群创建；我们只需要通知它
+    await window.electronAPI.invoke('group:respond-invite', inviterPeerId, groupId, true)
+    // 主进程会再发 group:created 推过来
+  } else {
+    await window.electronAPI.invoke('group:respond-invite', inviterPeerId, groupId, false)
+  }
+  groupStore.removePendingInvite(groupId, inviterPeerId)
+  activeInvite.value = null
+  showInviteDialog.value = false
 }
 
 async function handleSendText(content: string) {
@@ -675,5 +881,173 @@ function getInitials(name: string): string {
   to {
     opacity: 1;
   }
+}
+
+/* V1.4.0: 群邀请横幅 */
+.invite-banner {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  background: linear-gradient(135deg, #07c160 0%, #06ad56 100%);
+  color: white;
+  border-radius: 24px;
+  box-shadow: 0 8px 24px rgba(7, 193, 96, 0.35);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  animation: inviteBannerSlideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  max-width: 80%;
+  user-select: none;
+}
+
+.invite-banner:hover {
+  transform: translateX(-50%) translateY(-2px);
+  box-shadow: 0 12px 32px rgba(7, 193, 96, 0.45);
+}
+
+@keyframes inviteBannerSlideIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(-20px) }
+  to { opacity: 1; transform: translateX(-50%) translateY(0) }
+}
+
+/* V1.4.0: 群邀请确认对话框 */
+.invite-confirm-dialog {
+  background: #fff;
+  border-radius: 16px;
+  width: 90%;
+  max-width: 400px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+  animation: scaleIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95) }
+  to { opacity: 1; transform: scale(1) }
+}
+
+.invite-confirm-dialog .dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 24px;
+  border-bottom: 1px solid #f0f0f0;
+  background: linear-gradient(180deg, #fafafa 0%, #fff 100%);
+}
+
+.invite-confirm-dialog .dialog-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.invite-confirm-dialog .close-btn {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: #666;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s;
+}
+
+.invite-confirm-dialog .close-btn:hover {
+  background: #f5f5f5;
+  transform: rotate(90deg);
+}
+
+.invite-confirm-dialog .dialog-body {
+  padding: 24px;
+}
+
+.invite-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.invite-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.invite-text {
+  flex: 1;
+}
+
+.invite-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 4px;
+}
+
+.invite-from {
+  font-size: 12px;
+  color: #999;
+}
+
+.invite-hint {
+  font-size: 13px;
+  color: #999;
+  padding: 12px;
+  background: #f5f5f5;
+  border-radius: 8px;
+}
+
+.invite-confirm-dialog .dialog-footer {
+  padding: 16px 20px;
+  border-top: 1px solid #f0f0f0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.btn-cancel, .btn-accept {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-cancel {
+  background: #f5f5f5;
+  color: #666;
+}
+
+.btn-cancel:hover {
+  background: #e8e8e8;
+}
+
+.btn-accept {
+  background: linear-gradient(135deg, #07c160 0%, #06ad56 100%);
+  color: white;
+  box-shadow: 0 4px 12px rgba(7, 193, 96, 0.3);
+}
+
+.btn-accept:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(7, 193, 96, 0.4);
 }
 </style>

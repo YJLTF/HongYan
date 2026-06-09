@@ -4,6 +4,7 @@ import { parseCIDR } from '../network/network-utils'
 import { getConnectionEvents } from '../network/connection-manager'
 import { storageService } from '../storage/storage-service'
 import { pushFriendOnline, pushFriendOffline, pushFriendUpdated } from '../ipc/ipc-push'
+import { groupService } from './group-service'
 import type { IFriendDiscoveryService, Friend } from '@shared/types'
 import log from 'electron-log'
 
@@ -26,6 +27,10 @@ class FriendDiscoveryService implements IFriendDiscoveryService {
       (friend) => {
         log.info('Friend discovered:', friend.nickname)
         pushFriendOnline(friend)
+        // V1.4.0: 好友上线时重试待分发的群密钥
+        groupService.retryPendingDeliveriesForPeer(friend.peerId).catch(err =>
+          log.warn('Retry pending group key deliveries failed:', err)
+        )
       },
       (peerId) => {
         log.info('Friend went offline:', peerId)

@@ -4,13 +4,16 @@ import { app } from 'electron'
 import { Low } from 'lowdb'
 import { JSONFile } from 'lowdb/node'
 import { DB_NAME, getAppDataDir, FILES_DIR, LOGS_DIR } from '@shared/constants'
-import type { ChatRecord, Friend, FileTransferRecord, AppConfig } from '@shared/types'
+import { ConversationType } from '@shared/types'
+import type { ChatRecord, Friend, FileTransferRecord, AppConfig, Group } from '@shared/types'
 import log from 'electron-log'
 
 interface DatabaseSchema {
   chatRecords: ChatRecord[]
   friends: Friend[]
   fileTransfers: FileTransferRecord[]
+  // V1.4.0: 群组
+  groups: Group[]
 }
 
 let db: Low<DatabaseSchema> | null = null
@@ -55,22 +58,45 @@ export async function initDatabase(config?: AppConfig): Promise<Low<DatabaseSche
   }
 
   const dbPath = path.join(dataDir, DB_NAME.replace('.db', '.json'))
-  
+
   // 默认数据
   const defaultData: DatabaseSchema = {
     chatRecords: [],
     friends: [],
     fileTransfers: [],
+    groups: [],
   }
-  
+
   const adapter = new JSONFile<DatabaseSchema>(dbPath)
   db = new Low<DatabaseSchema>(adapter, defaultData)
-  
+
   await db.read()
   if (!db.data) {
     db.data = defaultData
   }
-  
+
+  // V1.4.0: 旧库迁移 - 补 groups 字段
+  if (!Array.isArray((db.data as any).groups)) {
+    log.info('Migrating database: adding groups collection')
+    ;(db.data as any).groups = []
+  }
+
+  // V1.4.0: 旧库迁移 - 给 1:1 聊天记录补 conversationType
+  let migratedCount = 0
+  for (const record of db.data.chatRecords) {
+    if (!record.conversationType) {
+      record.conversationType = record.groupId
+        ? ConversationType.GROUP
+        : ConversationType.P2P
+      migratedCount++
+    }
+  }
+  if (migratedCount > 0) {
+    log.info(`Migrated ${migratedCount} chat records with conversationType`)
+  }
+
+  await db.write()
+
   log.info('Database initialized at', dbPath)
   return db
 }

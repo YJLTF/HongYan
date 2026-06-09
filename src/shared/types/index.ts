@@ -22,6 +22,18 @@ export enum FileTransferStatus {
   INTERRUPTED = 'interrupted',
 }
 
+// V1.4.0: 区分 1:1 私聊和群聊会话
+export enum ConversationType {
+  P2P = 'p2p',
+  GROUP = 'group',
+}
+
+// V1.4.0: 群成员角色
+export enum GroupRole {
+  OWNER = 'owner',
+  MEMBER = 'member',
+}
+
 export interface PresenceAnnouncement {
   version: number
   peerId: string
@@ -51,6 +63,33 @@ export interface Friend {
   untrusted?: boolean
 }
 
+// V1.4.0: 群成员
+export interface GroupMember {
+  peerId: string
+  nickname: string
+  remark?: string
+  avatar?: string
+  joinedAt: number
+  role: GroupRole
+  // 持有群密钥的版本号（用于群密钥轮换时识别需要重新分发的成员）
+  keyVersion: number
+}
+
+// V1.4.0: 群
+export interface Group {
+  groupId: string         // grp_<uuid> 命名空间前缀
+  groupName: string
+  ownerPeerId: string
+  members: GroupMember[]
+  avatar?: string
+  createdAt: number
+  updatedAt: number
+  // 当前群密钥版本号；成员加入/退出触发 +1
+  keyVersion: number
+  // 备注（仅本地显示）
+  remark?: string
+}
+
 export interface NetworkSegment {
   address: string
   mask: string
@@ -73,7 +112,9 @@ export interface MessagePacket {
 
 export interface ChatRecord {
   id: string
-  peerId: string
+  // 1:1 场景：peerId 为对方 peerId，groupId 为空
+  // 群聊场景：groupId 为群 ID，peerId 为空（或保留发送者方便查询）
+  peerId?: string
   type: MessageType
   direction: 'sent' | 'received'
   content: string
@@ -83,6 +124,16 @@ export interface ChatRecord {
   status: MessageStatus
   timestamp: number
   recalled?: boolean
+  // V1.4.0: 会话类型
+  conversationType?: ConversationType
+  // V1.4.0: 群聊时为群 ID
+  groupId?: string
+  // V1.4.0: 群聊时为消息发送者 peerId（1:1 时可省略：发送=自己，接收=peerId）
+  senderPeerId?: string
+  // V1.4.0: @ 提及的成员 peerId
+  mentions?: string[]
+  // V1.4.0: @ 所有人
+  mentionedAll?: boolean
 }
 
 export interface FileTransferRecord {
@@ -134,6 +185,20 @@ export interface FileRequestPacket {
   fileSize: number
   md5: string
   timestamp: number
+  // V1.4.0: 群文件分享标识。true 时接收方自动接收（无 UI 弹窗、无私聊记录）
+  fromGroupShare?: boolean
+}
+
+// V1.4.0: 群成员向文件发送方请求下载文件（不含内容，仅请求）
+export interface FileShareRequestPacket {
+  version: number
+  transferId: string  // = group messageId
+  fromPeerId: string  // 群消息发送方（文件拥有者）
+  toPeerId: string    // 请求方
+  fileName: string
+  fileSize: number
+  md5: string
+  timestamp: number
 }
 
 export interface FileAcceptPacket {
@@ -180,6 +245,183 @@ export interface ProtocolPacket {
   data: unknown
 }
 
+// ============================================================
+// V1.4.0: 群聊相关协议包
+// ============================================================
+
+// 群消息业务包（被 groupKey 加密的内容）
+export interface GroupMessagePacket {
+  version: number
+  type: MessageType
+  messageId: string
+  groupId: string
+  fromPeerId: string
+  senderNickname: string
+  timestamp: number
+  payload: string
+  thumbnail?: string
+  fileName?: string
+  fileSize?: number
+  mentions?: string[]
+  mentionedAll?: boolean
+}
+
+// 群创建（owner → 初始成员；owner 本地也存一份）
+export interface GroupCreatePacket {
+  version: number
+  groupId: string
+  groupName: string
+  ownerPeerId: string
+  fromPeerId: string
+  timestamp: number
+  // 初始成员（不含 owner 自己），用于受邀者建立本地群组副本
+  initialMembers: GroupMemberSnapshot[]
+  // 用每个成员的 ECDH 会话密钥加密的 groupKey（base64 → EncryptedData JSON）
+  encryptedGroupKeys: Record<string, EncryptedData>
+  keyVersion: number
+  // owner 的昵称/头像快照
+  ownerNickname: string
+  ownerAvatar?: string
+}
+
+export interface GroupMemberSnapshot {
+  peerId: string
+  nickname: string
+  avatar?: string
+  role: GroupRole
+  joinedAt: number
+  keyVersion: number
+}
+
+// 群邀请（owner → 被邀请者）
+export interface GroupInvitePacket {
+  version: number
+  groupId: string
+  groupName: string
+  fromPeerId: string    // sender (owner)
+  inviterPeerId: string // owner
+  inviteePeerId: string
+  timestamp: number
+  // owner 用 invitee 的 ECDH 会话密钥加密的 groupKey
+  encryptedGroupKey: EncryptedData
+  keyVersion: number
+  inviterNickname: string
+  // V1.4.0: 被邀请者接受邀请时需要用这些数据建立本地群组
+  initialMembers: GroupMemberSnapshot[]
+  ownerNickname: string
+  ownerAvatar?: string
+}
+
+// 接受加入（被邀请者 → owner）
+export interface GroupJoinAcceptPacket {
+  version: number
+  groupId: string
+  fromPeerId: string
+  joinerPeerId: string
+  joinerNickname: string
+  joinerPublicKey?: string
+  timestamp: number
+}
+
+// 拒绝邀请（被邀请者 → owner）
+export interface GroupInviteRejectPacket {
+  version: number
+  groupId: string
+  fromPeerId: string
+  inviteePeerId: string
+  reason?: string
+  timestamp: number
+}
+
+// 主动退出（成员 → owner，owner 再 fan-out 给其他成员）
+export interface GroupLeavePacket {
+  version: number
+  groupId: string
+  fromPeerId: string
+  leaverPeerId: string
+  timestamp: number
+}
+
+// 踢人（owner → 被踢者 + 其他成员）
+export interface GroupKickPacket {
+  version: number
+  groupId: string
+  fromPeerId: string
+  kickedPeerId: string
+  timestamp: number
+}
+
+// 解散群（owner → 所有成员）
+export interface GroupDismissPacket {
+  version: number
+  groupId: string
+  fromPeerId: string
+  timestamp: number
+}
+
+// 群信息更新（owner → 所有成员）
+export type GroupUpdateType =
+  | 'name'
+  | 'avatar'
+  | 'add-members'
+  | 'remove-members'
+  | 'key-rotate'
+
+export interface GroupUpdatePacket {
+  version: number
+  groupId: string
+  fromPeerId: string
+  updateType: GroupUpdateType
+  timestamp: number
+  // name
+  newName?: string
+  // avatar
+  newAvatar?: string
+  // add-members（新成员的快照 + 用每个新成员 ECDH 加密的新 groupKey）
+  newMembers?: GroupMemberSnapshot[]
+  encryptedGroupKeys?: Record<string, EncryptedData>
+  // remove-members（被移除的成员 peerId）
+  removedMembers?: string[]
+  // key-rotate
+  newKeyVersion?: number
+  newEncryptedGroupKeys?: Record<string, EncryptedData>
+}
+
+// 群消息 ACK（接收者 → 发送者）
+export interface GroupMessageAckPacket {
+  version: number
+  groupId: string
+  messageId: string
+  fromPeerId: string
+  ackerPeerId: string
+  timestamp: number
+}
+
+// 群消息已读（用户 → 群主，V1.4.0 仅做可选记录）
+export interface GroupMessageReadPacket {
+  version: number
+  groupId: string
+  fromPeerId: string
+  readerPeerId: string
+  messageIds: string[]
+  timestamp: number
+}
+
+// 群消息撤回
+export interface GroupRecallPacket {
+  version: number
+  groupId: string
+  fromPeerId: string
+  messageId: string
+  timestamp: number
+}
+
+// 群邀请响应（接受/拒绝）的渲染端调用
+export interface GroupInviteResponse {
+  inviteId: string
+  accept: boolean
+}
+
 export interface IFriendDiscoveryService {
   start(): void
   stop(): void
@@ -194,8 +436,26 @@ export interface IMessageService {
   loadHistory(peerId: string, limit?: number, offset?: number): Promise<ChatRecord[]>
 }
 
+// V1.4.0: 群服务接口
+export interface IGroupService {
+  createGroup(groupName: string, memberPeerIds: string[]): Promise<Group>
+  inviteMembers(groupId: string, memberPeerIds: string[]): Promise<void>
+  leaveGroup(groupId: string): Promise<void>
+  kickMember(groupId: string, peerId: string): Promise<void>
+  dismissGroup(groupId: string): Promise<void>
+  updateGroupName(groupId: string, newName: string): Promise<void>
+  sendText(groupId: string, content: string, mentions?: string[], mentionedAll?: boolean): Promise<string>
+  sendImage(groupId: string, filePath: string): Promise<string>
+  sendFile(groupId: string, filePath: string): Promise<string>
+  loadHistory(groupId: string, limit?: number, offset?: number): Promise<ChatRecord[]>
+  getGroups(): Group[]
+  getGroup(groupId: string): Group | undefined
+  respondInvite(inviterPeerId: string, groupId: string, accept: boolean): Promise<void>
+}
+
 export interface IFileTransferService {
   sendFile(peerId: string, filePath: string): Promise<string>
+  sendSharedFile(peerId: string, transferId: string, fileName: string, fileSize: number, md5: string): Promise<void>
   acceptTransfer(transferId: string, savePath: string): void
   rejectTransfer(transferId: string): void
   getTransfers(): FileTransferRecord[]
@@ -224,6 +484,13 @@ export interface IStorageService {
   queryFileTransfers(peerId?: string): FileTransferRecord[]
   saveConfig(config: AppConfig): void
   loadConfig(): AppConfig | null
+  // V1.4.0: 群组管理
+  saveGroup(group: Group): void
+  queryGroups(): Group[]
+  getGroup(groupId: string): Group | undefined
+  deleteGroup(groupId: string): void
+  // V1.4.0: 群消息（复用 ChatRecord，扩展支持 groupId）
+  queryGroupChatRecords(groupId: string, limit?: number, offset?: number): ChatRecord[]
 }
 
 export const MainToRendererChannels = {
@@ -237,6 +504,15 @@ export const MainToRendererChannels = {
   FILE_UPDATED: 'file:updated',
   FILE_COMPLETED: 'file:completed',
   FILE_FAILED: 'file:failed',
+  // V1.4.0: 群相关推送
+  GROUP_CREATED: 'group:created',
+  GROUP_UPDATED: 'group:updated',
+  GROUP_DISSOLVED: 'group:dissolved',
+  GROUP_INVITE_RECEIVED: 'group:invite-received',
+  GROUP_INVITE_RESPONDED: 'group:invite-responded',
+  GROUP_MEMBER_CHANGED: 'group:member-changed',
+  GROUP_MESSAGE_RECEIVED: 'group:message-received',
+  GROUP_MESSAGE_STATUS_UPDATED: 'group:message-status-updated',
 } as const
 
 export const RendererToMainChannels = {
@@ -250,6 +526,42 @@ export const RendererToMainChannels = {
   FILE_REJECT: 'file:reject',
   CONFIG_GET: 'config:get',
   CONFIG_SET: 'config:set',
+  // V1.4.0: 群相关调用
+  GROUP_CREATE: 'group:create',
+  GROUP_INVITE: 'group:invite',
+  GROUP_RESPOND_INVITE: 'group:respond-invite',
+  GROUP_LEAVE: 'group:leave',
+  GROUP_KICK: 'group:kick',
+  GROUP_DISMISS: 'group:dismiss',
+  GROUP_LIST: 'group:list',
+  GROUP_LOAD_HISTORY: 'group:load-history',
+  GROUP_SEND_TEXT: 'group:send-text',
+  GROUP_SEND_IMAGE: 'group:send-image',
+  GROUP_SEND_FILE: 'group:send-file',
+  GROUP_UPDATE_NAME: 'group:update-name',
+  FILE_REQUEST_GROUP_FILE: 'file:request-group-file',
 } as const
 
 export const PROTOCOL_VERSION = 2
+// V1.4.0: 群协议版本（独立于 1:1 协议版本）
+export const GROUP_PROTOCOL_VERSION = 3
+
+// V1.4.0: 群数据包 kind 注册（TCP/UDP 路由前缀）
+export const GROUP_PACKET_KINDS = {
+  CREATE: 'group-create',
+  INVITE: 'group-invite',
+  JOIN_ACCEPT: 'group-join-accept',
+  INVITE_REJECT: 'group-invite-reject',
+  LEAVE: 'group-leave',
+  KICK: 'group-kick',
+  DISMISS: 'group-dismiss',
+  UPDATE: 'group-update',
+  MESSAGE: 'group-message',
+  ACK: 'group-ack',
+  READ: 'group-read',
+  RECALL: 'group-recall',
+  // V1.4.0 修复：成员向 owner 请求重发当前群密钥（解决重启后老群密钥丢失）
+  KEY_RESYNC: 'group-key-resync',
+} as const
+
+export type GroupPacketKind = typeof GROUP_PACKET_KINDS[keyof typeof GROUP_PACKET_KINDS]

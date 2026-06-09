@@ -1,5 +1,7 @@
-# Test script to launch two HongYan instances (PowerShell)
+# Test script to launch three HongYan instances (PowerShell)
 # Each instance gets its own data dir and ports so they don't collide.
+#
+# V1.4.0: Upgraded from 2 to 3 instances for group chat testing.
 #
 # Env vars are set INSIDE a child cmd.exe process rather than via
 # $env: in this shell, because Start-Process + npx (a .cmd wrapper)
@@ -10,7 +12,7 @@
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 Write-Host "=========================================" -ForegroundColor DarkCyan
-Write-Host "  HongYan Dual Instance Launcher" -ForegroundColor Cyan
+Write-Host "  HongYan Triple Instance Launcher" -ForegroundColor Cyan
 Write-Host "=========================================" -ForegroundColor DarkCyan
 Write-Host ""
 
@@ -49,8 +51,20 @@ Start-Process -FilePath "cmd.exe" -ArgumentList "/c", $cmd2 -WorkingDirectory $S
 Write-Host "  v Instance 2 started!" -ForegroundColor Cyan
 Write-Host ""
 
+Start-Sleep -Seconds 2
+
+# Start Instance 3
+Write-Host "Starting HongYan Instance 3..." -ForegroundColor Magenta
+Write-Host "  Data dir: HongYan-Test3" -ForegroundColor Gray
+Write-Host "  UDP port: 19880" -ForegroundColor Gray
+Write-Host "  TCP port: 19881" -ForegroundColor Gray
+$cmd3 = 'set HONGYAN_DATA_DIR=HongYan-Test3&& set HONGYAN_UDP_PORT=19880&& set HONGYAN_TCP_PORT=19881&& npx electron dist/main/index.js'
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c", $cmd3 -WorkingDirectory $ScriptDir -WindowStyle Normal
+Write-Host "  v Instance 3 started!" -ForegroundColor Magenta
+Write-Host ""
+
 Write-Host "=========================================" -ForegroundColor DarkCyan
-Write-Host "  Both instances launched successfully!" -ForegroundColor Yellow
+Write-Host "  All instances launched successfully!" -ForegroundColor Yellow
 Write-Host "=========================================" -ForegroundColor DarkCyan
 Write-Host ""
 Write-Host "  Instance 1 (Green):" -ForegroundColor Green
@@ -62,6 +76,11 @@ Write-Host "  Instance 2 (Cyan):" -ForegroundColor Cyan
 Write-Host "    Data: HongYan-Test2"
 Write-Host "    UDP:  19878"
 Write-Host "    TCP:  19879"
+Write-Host ""
+Write-Host "  Instance 3 (Magenta):" -ForegroundColor Magenta
+Write-Host "    Data: HongYan-Test3"
+Write-Host "    UDP:  19880"
+Write-Host "    TCP:  19881"
 Write-Host ""
 Write-Host "  WARNING Note:" -ForegroundColor Yellow
 Write-Host "    They may not discover each other automatically"

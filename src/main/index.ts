@@ -5,19 +5,22 @@ import log from 'electron-log'
 import { initDatabase, closeDatabase, getDefaultDataDir, getDataDir } from './storage/database'
 import { storageService } from './storage/storage-service'
 import { cryptoService } from './crypto/crypto-service'
+import { loadAllGroupKeys } from './crypto/group-key-manager'
 import { startTcpServer, stopTcpServer } from './network/tcp-communication'
 import { friendDiscoveryService } from './services/friend-discovery-service'
 import { messageService } from './services/message-service'
 import { fileTransferService } from './services/file-transfer-service'
+import { groupService } from './services/group-service'
 import { setPacketHandler, sendToPeer } from './network/connection-manager'
 import { hasPendingNegotiation } from './crypto/key-negotiation'
 import { clearIdentity } from './crypto/identity'
 import { createPacket } from './network/protocol'
 import { registerIpcHandlers } from './ipc/ipc-handlers'
-import { setMainWindow, getMainWindow, pushFriendOnline, pushFriendOffline, pushMessageReceived, pushFileTransferRequest } from './ipc/ipc-push'
+import { setMainWindow, getMainWindow, pushFriendOnline, pushFriendOffline, pushMessageReceived, pushFileTransferRequest, pushGroupMessageReceived, pushGroupCreated } from './ipc/ipc-push'
 import { createTray, destroyTray, showMainWindow as showTrayMainWindow } from './tray'
 import { initFlashManager, notify as flashNotify, attachFocusAutoClear } from './notifications/flash-manager'
 import { initNotificationManager, showMessage as notifMessage, showFileRequest as notifFileRequest } from './notifications/notification-manager'
+import { GROUP_PACKET_KINDS } from '@shared/types'
 import type { AppConfig, ProtocolPacket, ChatRecord, FileTransferRecord } from '@shared/types'
 import { MessageType, MessageStatus, FileTransferStatus } from '@shared/types'
 import crypto from 'crypto'
@@ -159,6 +162,9 @@ async function initApp(): Promise<void> {
 
   cryptoService.init(config.peerId)
   log.info('Crypto service initialized')
+
+  // V1.4.0 修复：恢复磁盘上已持久化的群密钥（解决重启后发文件报 No group key available）
+  loadAllGroupKeys()
 
   const tcpPort = await startTcpServer(handleIncomingPacket)
   log.info('TCP server started on port', tcpPort)
@@ -341,6 +347,20 @@ function handleIncomingPacket(packet: ProtocolPacket, peerIp: string): void {
           const fileRequest = JSON.parse(decrypted)
           log.info('File request decrypted:', fileRequest.fileName, fileRequest.fileSize)
 
+          // V1.4.0: 群文件分享（fromGroupShare=true）— 接收方已通过 file:request-group-file
+          // 预登记 receive 方向 FileTransferRecord（带 savePath），此处跳过 UI 通知和私聊记录，
+          // 直接以预登记的 savePath 自动接收
+          if (fileRequest.fromGroupShare) {
+            const pendingTransfers = storageService.queryFileTransfers()
+            const pending = pendingTransfers.find(t => t.transferId === fileRequest.transferId)
+            if (pending?.savePath) {
+              fileTransferService.acceptTransfer(fileRequest.transferId, pending.savePath)
+              log.info(`Group share auto-accept: ${fileRequest.fileName} → ${pending.savePath}`)
+              break
+            }
+            log.warn(`Group share: no pending download for transferId=${fileRequest.transferId}, falling back to manual flow`)
+          }
+
           const fileTransferRecord: FileTransferRecord = {
             transferId: fileRequest.transferId,
             peerId,
@@ -394,6 +414,79 @@ function handleIncomingPacket(packet: ProtocolPacket, peerIp: string): void {
       }
       case 'file-complete': {
         fileTransferService.handleFileComplete(packet.data as any, extractPeerId(packet))
+        break
+      }
+      // V1.4.0: 群文件下载请求（接收方 → 原始发送方）
+      case 'file-share-request': {
+        fileTransferService.handleFileShareRequest(packet.data, extractPeerId(packet))
+        break
+      }
+      // V1.4.0 修复：群密钥重同步（成员 → owner）
+      case GROUP_PACKET_KINDS.KEY_RESYNC: {
+        groupService.handleKeyResync(packet.data, extractPeerId(packet))
+        break
+      }
+      // V1.4.0: 群聊相关包
+      case GROUP_PACKET_KINDS.CREATE: {
+        groupService.handleGroupCreate(packet.data, extractPeerId(packet))
+        break
+      }
+      case GROUP_PACKET_KINDS.INVITE: {
+        groupService.handleGroupInvite(packet.data, extractPeerId(packet))
+        break
+      }
+      case GROUP_PACKET_KINDS.JOIN_ACCEPT: {
+        groupService.handleGroupJoinAccept(packet.data, extractPeerId(packet))
+        break
+      }
+      case GROUP_PACKET_KINDS.INVITE_REJECT: {
+        groupService.handleGroupInviteReject(packet.data, extractPeerId(packet))
+        break
+      }
+      case GROUP_PACKET_KINDS.LEAVE: {
+        groupService.handleGroupLeave(packet.data, extractPeerId(packet))
+        break
+      }
+      case GROUP_PACKET_KINDS.KICK: {
+        groupService.handleGroupKick(packet.data, extractPeerId(packet))
+        break
+      }
+      case GROUP_PACKET_KINDS.DISMISS: {
+        groupService.handleGroupDismiss(packet.data, extractPeerId(packet))
+        break
+      }
+      case GROUP_PACKET_KINDS.UPDATE: {
+        groupService.handleGroupUpdate(packet.data, extractPeerId(packet))
+        break
+      }
+      case GROUP_PACKET_KINDS.MESSAGE: {
+        const fromPeerId = extractPeerId(packet)
+        const msg = groupService.handleGroupMessage(packet.data, fromPeerId)
+        if (msg) {
+          pushGroupMessageReceived(msg)
+          flashNotify('message')
+          const groupId = (packet.data as any).groupId
+          const group = groupService.getGroup(groupId)
+          const sender = group?.members.find(m => m.peerId === fromPeerId)
+          const senderName = sender?.nickname || '群成员'
+          notifMessage({
+            groupId,
+            senderName: `[${group?.groupName || '群'}] ${senderName}`,
+            msg: { type: msg.type, content: msg.content, fileName: msg.fileName },
+          })
+        }
+        break
+      }
+      case GROUP_PACKET_KINDS.ACK: {
+        groupService.handleGroupAck(packet.data, extractPeerId(packet))
+        break
+      }
+      case GROUP_PACKET_KINDS.READ: {
+        groupService.handleGroupRead(packet.data, extractPeerId(packet))
+        break
+      }
+      case GROUP_PACKET_KINDS.RECALL: {
+        groupService.handleGroupRecall(packet.data, extractPeerId(packet))
         break
       }
       default:

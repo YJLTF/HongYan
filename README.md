@@ -24,6 +24,7 @@
 - **Windows 系统通知 (V1.3.0)** - 原生 Toast 横幅通知；点击通知自动唤起窗口并定位到对应聊天/文件传输；支持免打扰时段
 - **免打扰时段 (V1.3.0)** - 设置页可指定「不弹通知/不闪烁」时段（如 22:00 → 08:00，支持跨午夜），仅静默记录消息
 - **多源提醒协调 (V1.3.0)** - 横幅、任务栏、托盘三种提醒按用户设置和窗口状态自动取舍，避免重复打扰
+- **仿微信群聊 (V1.4.0)** - 创建/邀请/退出/解散群、@ 提及、群消息加密、群密钥轮换与离线补发、群文件共享；最多 50 人/群
 
 ## 技术栈
 
@@ -262,14 +263,14 @@ calculateOnlineTimeoutMs(heartbeat):
 
 ### 多实例本地测试
 
-项目内置测试脚本可同时启动两个隔离的实例（不同数据目录 + 不同端口 + 互不干扰）：
+项目内置测试脚本可同时启动三个隔离的实例（不同数据目录 + 不同端口 + 互不干扰），用于本地验证 P2P 与群聊功能：
 
 ```bash
 # PowerShell（推荐）
-npm run test:two
+npm run test:multi
 
 # Windows Batch
-npm run test:two:bat
+npm run test:multi:bat
 ```
 
 两个实例会分别启动：
@@ -394,6 +395,106 @@ V1.3.0 改变了**关闭窗口**的默认行为：
 ### 兼容性
 
 V1.3.0 与 V1.2.0 完全兼容（应用层协议、文件格式、加密方式未变），混合部署时仍能正常通讯。
+
+## 升级说明：V1.3.0 → V1.4.0
+
+V1.4.0 引入**仿微信群聊**能力，在保留 1:1 私聊的同时支持多人群组消息。
+
+### 新增功能
+
+| 功能 | 说明 |
+|---|---|
+| 创建/解散群 | 群主创建群并指定初始成员；群主可随时解散群（不可恢复） |
+| 邀请新成员 | 群主在群信息页可邀请好友加入；加入时自动轮换群密钥 |
+| 踢人/退出 | 群主可踢出成员（自动轮换密钥防被踢者解密后续消息）；非群主可主动退出 |
+| 群消息 | 支持文字、图片、文件（群文件由 owner 暂存于本地 `files/`，接收方按需触发 `file-share-request` 拉取） |
+| @ 提及 | 输入 `@` 触发成员选择浮层，可 @ 指定成员或 @所有人；被 @ 的消息在 UI 高亮 |
+| 群信息/成员 | 群信息对话框展示成员列表、在线状态；群主可重命名群 |
+| 群消息系统通知 | 群消息复用 V1.3.0 横幅通知（标题前缀群名），免打扰时段同样生效 |
+| 未读计数 | 群列表显示未读红点，进入群后清零 |
+| 群密钥轮换 | 成员变更（加入/退出/踢人）时自动生成新群密钥，旧成员无法解密后续消息 |
+| 离线补发 | 群密钥分发失败时进入待重试队列，好友上线时自动重试 |
+
+### 架构变更
+
+| 维度 | V1.3.0 | V1.4.0 |
+|---|---|---|
+| 会话类型 | 仅 1:1 私聊 | 1:1 + 群聊（`conversationType: p2p/group`） |
+| 消息加密 | ECDH 会话密钥 | ECDH × 群密钥双重加密（外层 ECDH、内层 AES-256-GCM） |
+| 群密钥 | 无 | AES-256 群密钥；群主负责生成/分发/轮换 |
+| 消息扇出 | 点对点 | 发送方独立扇出到所有成员（去中心化） |
+| 数据库 | `chatRecords` / `friends` / `fileTransfers` | + `groups: Group[]`（群元信息） |
+| 协议版本 | `version: 2` | 群聊包 `version: 3`，1:1 仍为 `version: 2` |
+| 协议 kind | `key-negotiation / message / ack / file-*` | + `group-create / group-invite / group-join-accept / group-leave / group-kick / group-dismiss / group-update / group-message / group-ack / group-recall` |
+| 导航 | 聊天 / 联系人 / 传输 | + 群聊 tab |
+| 多实例测试 | 2 个实例 | 3 个实例（`test-multi-instances.bat` / `.ps1`） |
+
+### 关键设计决策
+
+1. **群密钥管理**：群主生成 AES-256 群密钥，用各成员的 ECDH 会话密钥加密分发（`groupKeyPayload`）。所有群消息用群密钥 AES-256-GCM 加密后，再用每个成员的 ECDH 会话密钥二次封装
+2. **去中心化扇出**：发送方独立给每个成员发包，群主不承担消息中转（群主仅负责成员管理 + 密钥分发）
+3. **密钥轮换**：成员变更触发 `keyVersion++`，被踢者/退出者无法解密后续消息
+4. **群 ID 命名**：`grp_<uuid>` 前缀，便于一眼区分
+5. **离线补发**：群主维护 `pendingKeyDeliveries[groupId] = Set<peerId>`，好友上线时自动重试
+6. **大小限制**：单群最大 50 成员，防止扇出风暴（V1.5.0 考虑 Sender Key 优化）
+
+### 兼容性
+
+- **1:1 私聊完全兼容** V1.3.0（应用层协议、文件格式、加密方式未变）
+- **群聊协议独立** (`version: 3`)，老版本客户端收到 `group-*` 包按未知包忽略
+- **数据库自动迁移**：旧库无 `groups` 集合时初始化为空数组；旧 `chatRecords` 补 `conversationType: p2p` 默认值
+- 旧 `master.key` 损坏检测逻辑保留
+- V1.3.0 客户端在 V1.4.0 群中只能接收 1:1 消息；群消息会被忽略（INFO 日志，不报错）
+
+### 三实例本地测试
+
+V1.4.0 群聊推荐用三个实例验证完整流程（建群、邀请、加入、发消息、退出）：
+
+```bash
+# PowerShell（推荐）
+npm run test:multi
+
+# Windows Batch
+npm run test:multi:bat
+```
+
+三实例端口/数据目录：
+
+| 实例 | 数据目录 | UDP 端口 | TCP 端口 |
+|------|----------|----------|----------|
+| Instance 1 | `HongYan-Test1` | 19876 | 19877 |
+| Instance 2 | `HongYan-Test2` | 19878 | 19879 |
+| Instance 3 | `HongYan-Test3` | 19880 | 19881 |
+
+### 测试场景清单
+
+1. 三实例同时启动，10 秒内互见
+2. Instance 1 在群聊 tab 点 "+" → 选 Instance 2、3 → 命名 → 创建
+3. Instance 2、3 收到横幅邀请 → 点击接受
+4. 任意成员发消息 → 其他人实时收到
+5. @ 提及：发送方输入 `@` 选成员 → 接收方消息高亮
+6. 退出/踢人：被踢者/退出者从群列表移除；其他成员群成员列表更新
+7. 解散群：群主解散 → 所有成员群列表清空
+8. 离线补发：Instance 1 邀请离线的好友 → 好友上线后自动收到 invite
+9. 重启后群列表/消息/成员关系正确恢复
+10. 与 1:1 私聊并行使用互不干扰
+11. 群文件共享：A 在群中发文件 → B/C 看到文件气泡 → B 点"下载" → 收到 A 分发的文件
+12. 群密钥持久化：建群后任意实例重启 → 发消息/文件正常（密钥从 `group-keys.json` 恢复）
+
+### V1.4.0 后续修复（合并在同分支，未单独发版）
+
+V1.4.0 主功能发布后，在三实例实测中又迭代了一轮：
+
+| 修复 | 说明 |
+|------|------|
+| **群密钥磁盘持久化** | 原实现群密钥仅存内存，应用重启后丢失，发文件报 `No group key available`。改为 AES-256-GCM 加密存到 `${dataDir}/group-keys.json`（用 master key + aad `hongyan-group-keys-v1`），启动时 `loadAllGroupKeys()` 恢复 |
+| **密钥自动重同步** | 即使双方密钥都丢失（如老群在持久化修复前建的），成员发消息时会自动 `KEY_RESYNC` 请求 owner，owner 收到后用现有 key 回传（若 owner 也没 key 则发 nack 让请求方秒失败） |
+| **群文件共享** | 完整实现：owner 把文件 md5+暂存到 `files/<messageId>_<name>`，广播群消息（type=`file`），成员点"下载"触发 `file-share-request`，owner 复用现有 file-transfer-service 走 `file-request`（带 `fromGroupShare:true`，接收方静默接收不弹私聊 UI） |
+| **@ 浮层不打开 bug** | 原 watcher 加了 `cursor > lastMentionEnd` 守卫，但 `lastMentionEnd` 初值 0 误判了"首次输入 @"：导致用户第一次按 `@` 时就被强制关闭浮层。移除该守卫，只保留 `suppressMentionWatch` 标志位（selectMention 触发 text 变化时跳过 watcher）+ `nextTick` 移光标 + `textareaRef.value.value === newText` 保护 |
+| **@ 浮层不关闭 bug** | selectMention 同步 `setSelectionRange` 时 DOM 还未更新，watcher 读旧 DOM 光标看不到新插入的尾随空格，误判为"还在 @ 输入中"重开。改在 `nextTick` 中移光标（此时 DOM 已同步），并加 `if (textareaRef.value.value === newText)` 保护避免覆盖用户后续输入 |
+| **侧边栏图标区分** | 联系人 tab 之前是 2 人头，和群聊 tab 视觉冲突。改为联系人 = 单人剪影，群聊 = 3 人头 + 粉色渐变背景；群聊列表项和群聊视图头部同步替换 |
+| **群文件类型支持** | 私聊和群聊都补全 `selectFile` + `file:select` IPC，MessageBubble 对群消息用单独的"下载"按钮（不弹私聊接收/拒绝 UI） |
+| **错误信息可读化** | `No group key available` 原是统一文案，owner 离线/owner 也丢密钥/会话密钥失败/超时 全部混在一起。现区分 7 种 `reason`，主进程日志加 `[KeyResync]` 前缀，错误文案带可读原因 + 修复建议（如"请重新创建群以恢复"） |
 
 ## 许可证
 
