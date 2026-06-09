@@ -1,6 +1,7 @@
 import { getDatabase } from './database'
 import { saveConfig, loadConfig as loadConfigFromStore } from './config-store'
-import type { IStorageService, ChatRecord, Friend, FileTransferRecord, AppConfig, FileTransferStatus, MessageStatus } from '@shared/types'
+import { ConversationType } from '@shared/types'
+import type { IStorageService, ChatRecord, Friend, FileTransferRecord, AppConfig, FileTransferStatus, MessageStatus, Group } from '@shared/types'
 import log from 'electron-log'
 
 class StorageService implements IStorageService {
@@ -31,7 +32,7 @@ class StorageService implements IStorageService {
   queryChatRecords(peerId: string, limit = 100, offset = 0): ChatRecord[] {
     const db = getDatabase()
     const records = db.data.chatRecords
-      .filter(r => r.peerId === peerId)
+      .filter(r => r.peerId === peerId && r.conversationType !== ConversationType.GROUP)
       .sort((a, b) => b.timestamp - a.timestamp)
       .slice(offset, offset + limit)
       .reverse()
@@ -156,6 +157,58 @@ class StorageService implements IStorageService {
 
   loadConfig(): AppConfig | null {
     return loadConfigFromStore()
+  }
+
+  // ============================================================
+  // V1.4.0: 群组管理
+  // ============================================================
+
+  saveGroup(group: Group): void {
+    const db = getDatabase()
+    const index = db.data.groups.findIndex(g => g.groupId === group.groupId)
+    if (index !== -1) {
+      db.data.groups[index] = group
+    } else {
+      db.data.groups.push(group)
+    }
+    db.write().catch(err => log.error('Failed to save group:', err))
+  }
+
+  queryGroups(): Group[] {
+    const db = getDatabase()
+    return [...db.data.groups]
+  }
+
+  getGroup(groupId: string): Group | undefined {
+    const db = getDatabase()
+    return db.data.groups.find(g => g.groupId === groupId)
+  }
+
+  deleteGroup(groupId: string): void {
+    const db = getDatabase()
+    db.data.groups = db.data.groups.filter(g => g.groupId !== groupId)
+    // 同时删除该群的所有聊天记录
+    db.data.chatRecords = db.data.chatRecords.filter(r => r.groupId !== groupId)
+    db.write().catch(err => log.error('Failed to delete group:', err))
+  }
+
+  // ============================================================
+  // V1.4.0: 群消息
+  // ============================================================
+
+  queryGroupChatRecords(groupId: string, limit = 100, offset = 0): ChatRecord[] {
+    const db = getDatabase()
+    const records = db.data.chatRecords
+      .filter(r => r.groupId === groupId && r.conversationType === ConversationType.GROUP)
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(offset, offset + limit)
+      .reverse()
+    return records
+  }
+
+  // V1.4.0: 重置群消息未读计数
+  resetGroupUnreadCount(groupId: string): void {
+    // 当前未单独存储未读计数（内存由 group-store 维护），保留扩展位
   }
 }
 

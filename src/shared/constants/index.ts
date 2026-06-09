@@ -62,3 +62,32 @@ export const LOGS_DIR = 'logs'
 export const TRAY_ICON_NORMAL = 'tray-normal.png'
 export const TRAY_ICON_ACTIVE = 'tray-active.png'
 export const TRAY_TOOLTIP = '鸿雁 HongYan'
+
+// ============================================================
+// V1.4.0: 群聊相关常量
+// ============================================================
+
+// 群 ID 命名空间前缀，便于一眼区分
+export const GROUP_ID_PREFIX = 'grp_'
+
+// 单群最大成员数（防止扇出风暴）
+export const MAX_GROUP_MEMBERS = 50
+
+// 群密钥版本保留数（旧版本密钥保留多少代用于解密在途消息）
+export const GROUP_KEY_VERSION_RETENTION = 1
+
+// 群密钥轮换后未送达成员的离线补发重试间隔（ms）
+export const GROUP_KEY_RETRY_INTERVAL_MS = 30000
+
+// 群密钥轮换最大重试次数
+export const GROUP_KEY_MAX_RETRIES = 5
+
+// 群消息发送失败时的最大重试次数
+export const GROUP_MESSAGE_MAX_RETRIES = 3
+
+// 多实例测试时扩展的 UDP 扫描端口
+// V1.4.0: 支持 3 实例，UDP 19876/78/80 + TCP 19877/79/81
+// 多实例模式（设置了 HONGYAN_DATA_DIR）下扫描范围
+export const MULTI_INSTANCE_UDP_PORTS = [19876, 19878, 19880]
+export const MULTI_INSTANCE_UDP_SCAN_PORTS = [19876, 19878, 19880]
+

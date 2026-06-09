@@ -106,6 +106,7 @@ interface NotificationOptions {
   title: string
   body: string
   peerId?: string
+  groupId?: string
   transferId?: string
   silent?: boolean
 }
@@ -134,6 +135,11 @@ function fireNotification(opts: NotificationOptions): void {
             type: 'message',
             peerId: opts.peerId,
           })
+        } else if (opts.groupId) {
+          win.webContents.send('notification:click', {
+            type: 'group-message',
+            groupId: opts.groupId,
+          })
         } else if (opts.transferId) {
           win.webContents.send('notification:click', {
             type: 'file',
@@ -152,7 +158,8 @@ function fireNotification(opts: NotificationOptions): void {
  * 弹出一条新消息的系统通知
  */
 export function showMessage(args: {
-  peerId: string
+  peerId?: string
+  groupId?: string
   senderName: string
   msg: { type?: string; content?: string; fileName?: string }
 }): void {
@@ -161,6 +168,7 @@ export function showMessage(args: {
     title: args.senderName,
     body: buildBody(args.msg),
     peerId: args.peerId,
+    groupId: args.groupId,
   })
 }
 

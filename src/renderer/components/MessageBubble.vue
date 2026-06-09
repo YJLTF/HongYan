@@ -17,9 +17,13 @@
     <div v-else class="avatar-spacer"></div>
 
     <!-- 消息内容区域 -->
-    <div class="message-body">
-      <!-- 发送者名称（仅接收方且显示头像时） -->
-      <div v-if="direction === 'received' && showAvatar" class="sender-name">
+    <div class="message-body" :class="{ 'mentioned': isMentioned, 'mention-all': mentionedAllFlag }">
+      <!-- V1.4.0: 群聊中被 @ 的消息加特殊高亮 -->
+      <div v-if="isMentioned" class="mention-indicator">
+        {{ mentionedAllFlag ? '@所有人提到了我' : '@ 我' }}
+      </div>
+      <!-- 发送者名称（接收方：1:1 仅显示头像时；群聊：始终显示） -->
+      <div v-if="shouldShowSenderName" class="sender-name">
         {{ displayName }}
       </div>
 
@@ -53,7 +57,10 @@
               <div class="file-size">{{ formatFileSize(record.fileSize) }}</div>
             </div>
           </div>
-          <div class="file-actions" v-if="direction === 'received' && !fileDecided">
+          <div class="file-actions" v-if="isGroupFileDownloadable">
+            <button class="btn-file-accept" @click.stop="$emit('downloadFile', record)">下载</button>
+          </div>
+          <div class="file-actions" v-else-if="direction === 'received' && !fileDecided">
             <button class="btn-file-accept" @click.stop="$emit('acceptFile', record)">接收</button>
             <button class="btn-file-saveas" @click.stop="$emit('saveAsFile', record)">另存为</button>
             <button class="btn-file-reject" @click.stop="$emit('rejectFile', record)">拒绝</button>
@@ -121,7 +128,7 @@ const props = defineProps<{
   record: ChatRecord,
   showAvatar?: boolean
 }>()
-defineEmits(['viewImage', 'acceptFile', 'saveAsFile', 'rejectFile'])
+defineEmits(['viewImage', 'acceptFile', 'saveAsFile', 'rejectFile', 'downloadFile'])
 
 const friendStore = useFriendStore()
 const configStore = useConfigStore()
@@ -129,12 +136,35 @@ const transferStore = useTransferStore()
 
 const direction = props.record.direction
 
+// V1.4.0: 群聊消息始终显示发送者名称（1:1 仅接收方显示）
+const isGroup = !!props.record.groupId || props.record.conversationType === 'group'
+const shouldShowSenderName = computed(() => {
+  if (isGroup) return !!displayName.value
+  return direction === 'received' && !!props.showAvatar
+})
+
+// V1.4.0: 当前用户是否被 @ 提及
+const isMentioned = computed(() => {
+  if (!isGroup) return false
+  if (direction !== 'received') return false
+  if (props.record.mentionedAll) return true
+  const myId = configStore.peerId
+  if (!myId) return false
+  return Array.isArray(props.record.mentions) && props.record.mentions.includes(myId)
+})
+const mentionedAllFlag = computed(() => !!props.record.mentionedAll)
+
 const fileDecided = computed(() => {
   if (props.record.type !== 'file') return false
   if (props.record.direction === 'sent') return true
   const t = transferStore.transfers.find(tr => tr.transferId === props.record.id)
   if (!t) return false
   return ['accepted', 'rejected', 'transferring', 'completed', 'failed', 'interrupted'].includes(t.status)
+})
+
+// V1.4.0: 群聊接收的文件用"下载"按钮（不弹私聊 UI）
+const isGroupFileDownloadable = computed(() => {
+  return isGroup && props.record.type === 'file' && props.record.direction === 'received' && !fileDecided.value
 })
 
 const fileResultClass = computed(() => {
@@ -181,6 +211,13 @@ const fileStatusText = computed(() => {
 
 // 根据方向决定显示哪个头像和信息
 const displayAvatar = computed(() => {
+  if (isGroup) {
+    // 群聊：以 senderPeerId 找发送者（自己或好友）
+    const senderId = props.record.senderPeerId || (direction === 'sent' ? configStore.peerId : props.record.peerId)
+    if (senderId === configStore.peerId) return configStore.avatar
+    const friend = friendStore.friends.find((f) => f.peerId === senderId)
+    return friend?.avatar
+  }
   if (direction === 'sent') {
     return configStore.avatar
   } else {
@@ -190,6 +227,13 @@ const displayAvatar = computed(() => {
 })
 
 const displayName = computed(() => {
+  if (isGroup) {
+    // 群聊：以 senderPeerId 找发送者昵称
+    const senderId = props.record.senderPeerId || (direction === 'sent' ? configStore.peerId : props.record.peerId)
+    if (senderId === configStore.peerId) return configStore.nickname
+    const friend = friendStore.friends.find((f) => f.peerId === senderId)
+    return friend?.remark || friend?.nickname || ''
+  }
   if (direction === 'sent') {
     return configStore.nickname
   } else {
@@ -302,6 +346,22 @@ function formatFileSize(bytes?: number): string {
 
 .message-item.received .message-body {
   align-items: flex-start;
+}
+
+/* V1.4.0: 群聊被 @ 消息高亮 */
+.message-body.mentioned .bubble.text-bubble {
+  border: 2px solid #07c160;
+  box-shadow: 0 0 0 3px rgba(7, 193, 96, 0.15);
+}
+
+.mention-indicator {
+  font-size: 11px;
+  color: #07c160;
+  background: rgba(7, 193, 96, 0.1);
+  padding: 1px 8px;
+  border-radius: 8px;
+  align-self: flex-start;
+  font-weight: 600;
 }
 
 .sender-name {

@@ -5,14 +5,20 @@ import fs from 'fs'
 import { friendDiscoveryService } from '../services/friend-discovery-service'
 import { messageService } from '../services/message-service'
 import { fileTransferService } from '../services/file-transfer-service'
+import { groupService } from '../services/group-service'
 import { storageService } from '../storage/storage-service'
 import { getDataDir } from '../storage/database'
 import { udpBroadcaster } from '../network/udp-broadcaster'
+import { sendToPeer } from '../network/connection-manager'
+import { createPacket } from '../network/protocol'
+import { cryptoService } from '../crypto/crypto-service'
 import { showMainWindow as showTrayWindow } from '../tray'
-import { getMainWindow } from './ipc-push'
+import { getMainWindow, pushFileUpdated } from './ipc-push'
+import { RendererToMainChannels, FileTransferStatus } from '@shared/types'
 import type {
-  RendererToMainChannels,
-  MainToRendererChannels,
+  Group,
+  FileShareRequestPacket,
+  FileTransferRecord,
 } from '@shared/types'
 import log from 'electron-log'
 
@@ -132,6 +138,81 @@ export function registerIpcHandlers(): void {
       return await fileTransferService.sendFile(peerId, filePath)
     } catch (err) {
       log.error('Send file failed:', err)
+      return { error: (err as Error).message }
+    }
+  })
+
+  // V1.4.0: 群聊文件下载 — 群成员请求发送方下发已暂存的文件
+  ipcMain.handle('file:request-group-file', async (
+    _event,
+    groupId: string,
+    messageId: string,
+    senderPeerId: string,
+    savePath: string,
+  ) => {
+    try {
+      // 从群消息中查文件元数据
+      const records = storageService.queryGroupChatRecords(groupId, 1000, 0)
+      const record = records.find(r => r.id === messageId)
+      if (!record) return { error: 'Group message not found' }
+      if (record.type !== 'file') return { error: 'Message is not a file' }
+      if (record.senderPeerId !== senderPeerId) {
+        return { error: 'Sender mismatch' }
+      }
+      // payload 可能是密文，也可能是兼容旧格式
+      let md5 = ''
+      try {
+        if (record.content) {
+          const parsed = JSON.parse(record.content)
+          if (parsed?.md5) md5 = parsed.md5
+        }
+      } catch { /* content 可能是空或旧数据 */ }
+
+      // 通过加密通道向发送方请求文件
+      const friend = udpBroadcaster.getFriend(senderPeerId)
+      if (!friend) return { error: 'Sender is not a known peer' }
+
+      const fileName = record.fileName || 'file'
+      const fileSize = record.fileSize || 0
+      const selfId = storageService.loadConfig()?.peerId || ''
+
+      // 构造 FileShareRequestPacket 并加密
+      const shareRequest: FileShareRequestPacket = {
+        version: 1,
+        transferId: messageId,
+        fromPeerId: senderPeerId,
+        toPeerId: selfId,
+        fileName,
+        fileSize,
+        md5,
+        timestamp: Date.now(),
+      }
+      const encrypted = cryptoService.encryptForTransmission(senderPeerId, JSON.stringify(shareRequest))
+      await sendToPeer(friend, createPacket('file-share-request', {
+        fromPeerId: selfId,
+        encrypted,
+      }))
+
+      // 立即登记一条 receive 方向的 FileTransferRecord，让 UI 状态变化可见
+      // （主进程收到 fromGroupShare 的 file-request 时会查这个 record 取 savePath 自动接收）
+      const pendingRecord: FileTransferRecord = {
+        transferId: messageId,
+        peerId: senderPeerId,
+        direction: 'receive',
+        fileName,
+        fileSize,
+        status: FileTransferStatus.PENDING,
+        progress: 0,
+        md5,
+        savePath,
+        timestamp: Date.now(),
+      }
+      storageService.saveFileTransfer(pendingRecord)
+      pushFileUpdated(pendingRecord)
+
+      return { success: true }
+    } catch (err) {
+      log.error('Request group file failed:', err)
       return { error: (err as Error).message }
     }
   })
@@ -293,6 +374,137 @@ export function registerIpcHandlers(): void {
   // V1.3.0: 渲染端请求显示主窗口（用于从托盘通知点击唤起）
   ipcMain.handle('app:show-main-window', () => {
     showTrayWindow(getMainWindow)
+  })
+
+  // ============================================================
+  // V1.4.0: 群聊 IPC
+  // ============================================================
+
+  ipcMain.handle(RendererToMainChannels.GROUP_CREATE, async (_event, groupName: string, memberPeerIds: string[]) => {
+    try {
+      const group = await groupService.createGroup(groupName, memberPeerIds)
+      return { group }
+    } catch (err) {
+      log.error('Create group failed:', err)
+      return { error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle(RendererToMainChannels.GROUP_INVITE, async (_event, groupId: string, memberPeerIds: string[]) => {
+    try {
+      await groupService.inviteMembers(groupId, memberPeerIds)
+      return { success: true }
+    } catch (err) {
+      log.error('Invite members failed:', err)
+      return { error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle(RendererToMainChannels.GROUP_RESPOND_INVITE, async (_event, inviterPeerId: string, groupId: string, accept: boolean) => {
+    try {
+      // V1.4.0: 接受邀请时先建立本地群组（基于暂存的 invite 数据），再回 ACK
+      if (accept) {
+        const invite = groupService.takePendingInvite(inviterPeerId, groupId)
+        if (invite) {
+          groupService.acceptInviteCreateLocalGroup(invite, inviterPeerId)
+        }
+      }
+      await groupService.respondInvite(inviterPeerId, groupId, accept)
+      return { success: true }
+    } catch (err) {
+      log.error('Respond invite failed:', err)
+      return { error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle(RendererToMainChannels.GROUP_LEAVE, async (_event, groupId: string) => {
+    try {
+      await groupService.leaveGroup(groupId)
+      return { success: true }
+    } catch (err) {
+      log.error('Leave group failed:', err)
+      return { error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle(RendererToMainChannels.GROUP_KICK, async (_event, groupId: string, peerId: string) => {
+    try {
+      await groupService.kickMember(groupId, peerId)
+      return { success: true }
+    } catch (err) {
+      log.error('Kick member failed:', err)
+      return { error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle(RendererToMainChannels.GROUP_DISMISS, async (_event, groupId: string) => {
+    try {
+      await groupService.dismissGroup(groupId)
+      return { success: true }
+    } catch (err) {
+      log.error('Dismiss group failed:', err)
+      return { error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle(RendererToMainChannels.GROUP_LIST, () => {
+    try {
+      return { groups: groupService.getGroups() }
+    } catch (err) {
+      log.error('List groups failed:', err)
+      return { error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle(RendererToMainChannels.GROUP_LOAD_HISTORY, async (_event, groupId: string, limit?: number, offset?: number) => {
+    try {
+      const records = await groupService.loadHistory(groupId, limit, offset)
+      return { records }
+    } catch (err) {
+      log.error('Load group history failed:', err)
+      return { records: [] }
+    }
+  })
+
+  ipcMain.handle(RendererToMainChannels.GROUP_SEND_TEXT, async (_event, groupId: string, content: string, mentions?: string[], mentionedAll?: boolean) => {
+    try {
+      const messageId = await groupService.sendText(groupId, content, mentions, mentionedAll)
+      return { messageId }
+    } catch (err) {
+      log.error('Send group text failed:', err)
+      return { error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle(RendererToMainChannels.GROUP_SEND_IMAGE, async (_event, groupId: string, filePath: string) => {
+    try {
+      const messageId = await groupService.sendImage(groupId, filePath)
+      return { messageId }
+    } catch (err) {
+      log.error('Send group image failed:', err)
+      return { error: (err as Error).message }
+    }
+  })
+
+  // V1.4.0: 群聊发送文件（仅广播文件元数据，文件本体暂存于发送方 FILES_DIR）
+  ipcMain.handle(RendererToMainChannels.GROUP_SEND_FILE, async (_event, groupId: string, filePath: string) => {
+    try {
+      const messageId = await groupService.sendFile(groupId, filePath)
+      return { messageId }
+    } catch (err) {
+      log.error('Send group file failed:', err)
+      return { error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle(RendererToMainChannels.GROUP_UPDATE_NAME, async (_event, groupId: string, newName: string) => {
+    try {
+      await groupService.updateGroupName(groupId, newName)
+      return { success: true }
+    } catch (err) {
+      log.error('Update group name failed:', err)
+      return { error: (err as Error).message }
+    }
   })
 
   log.info('IPC handlers registered')

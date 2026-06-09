@@ -19,9 +19,10 @@ function isMultiInstanceMode(): boolean {
 }
 
 // 注意：每次调用时读取端口，避免在模块加载时 env var 尚未生效
+// V1.4.0: 多实例测试脚本支持 3 个实例，端口扩展到 19876/78/80
 function getScanUdpPorts(): number[] {
   return isMultiInstanceMode()
-    ? [19876, 19877, 19878, 19879, 19880]
+    ? [19876, 19878, 19880]
     : [getUdpPort()]
 }
 

@@ -1,14 +1,14 @@
 {
   "name": "hongyan",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "HongYan LAN P2P Messenger",
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "test:two": "powershell -ExecutionPolicy Bypass -File test-two-instances.ps1",
-    "test:two:bat": "test-two-instances.bat",
+    "test:multi": "powershell -ExecutionPolicy Bypass -File test-multi-instances.ps1",
+    "test:multi:bat": "test-multi-instances.bat",
     "package": "cross-env NODE_ENV=production electron-vite build && electron-builder --win",
     "package:portable": "cross-env NODE_ENV=production electron-vite build && electron-builder --win portable",
     "package:nsis": "cross-env NODE_ENV=production electron-vite build && electron-builder --win nsis"

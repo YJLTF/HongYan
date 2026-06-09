@@ -13,6 +13,7 @@ import type {
   IFileTransferService,
   FileTransferRecord,
   FileRequestPacket,
+  FileShareRequestPacket,
   FileAcceptPacket,
   FileChunkPacket,
   FileCompletePacket,
@@ -137,6 +138,98 @@ class FileTransferService implements IFileTransferService {
     storageService.saveChatRecord(chatRecord)
 
     return transferId
+  }
+
+  // ============================================================
+  // V1.4.0: 群文件共享
+  //   - sendSharedFile:  群文件发送方把 FILES_DIR 中已暂存的文件分发给请求者
+  //                       （fileId 沿用 group messageId，文件路径不再复制）
+  //   - handleFileShareRequest: 群成员在群聊中点击"下载" → 主进程向发送方请求文件
+  // ============================================================
+  async sendSharedFile(
+    peerId: string,
+    transferId: string,
+    fileName: string,
+    fileSize: number,
+    md5: string,
+  ): Promise<void> {
+    const friend = udpBroadcaster.getFriend(peerId)
+    if (!friend || !friend.online) throw new Error('Peer is not online')
+
+    // 找到 FILES_DIR 中暂存的文件
+    const dataDir = getDataDir()
+    const storedFileName = `${transferId}_${fileName}`
+    const storedFilePath = path.join(dataDir, FILES_DIR, storedFileName)
+    if (!fs.existsSync(storedFilePath)) {
+      throw new Error(`Shared file not found in storage: ${storedFileName}`)
+    }
+
+    // 会话密钥协商
+    if (cryptoService.needsRenegotiation(peerId)) {
+      const requestJson = await cryptoService.negotiateKey(peerId)
+      if (requestJson) {
+        await sendToPeer(friend, createPacket('key-negotiation', JSON.parse(requestJson)))
+        await cryptoService.waitForSessionKey(peerId)
+      }
+    }
+
+    // 构造 file-request 包（fromGroupShare=true 让接收方自动接收、不弹私聊 UI）
+    const request: FileRequestPacket = {
+      version: PROTOCOL_VERSION,
+      transferId,
+      fromPeerId: this.selfPeerId(),
+      toPeerId: peerId,
+      fileName,
+      fileSize,
+      md5,
+      timestamp: Date.now(),
+      fromGroupShare: true,
+    }
+    const encrypted = cryptoService.encryptForTransmission(peerId, JSON.stringify(request))
+    await sendToPeer(friend, createPacket('file-request', this.wrapEncrypted(peerId, encrypted)))
+
+    // 记录一条方向=send 的 FileTransferRecord（供现有 accept/chunk/complete 流程使用）
+    const record: FileTransferRecord = {
+      transferId,
+      peerId,
+      direction: 'send',
+      fileName,
+      fileSize,
+      status: FileTransferStatus.PENDING,
+      progress: 0,
+      md5,
+      timestamp: Date.now(),
+    }
+    storageService.saveFileTransfer({
+      ...record,
+      fileName: storedFileName,  // 物理文件名
+    })
+    pushFileUpdated(record)
+
+    log.info(`Shared file send-init: transferId=${transferId} → ${peerId} (${fileName})`)
+  }
+
+  // 群成员发起下载请求：向群文件发送方（peerId）请求 transferId 对应的文件
+  async handleFileShareRequest(data: any, fromPeerId: string): Promise<void> {
+    try {
+      const payload = (data.encrypted !== undefined)
+        ? (() => {
+            const dec = cryptoService.decryptFromTransmission(fromPeerId, data.encrypted)
+            return JSON.parse(dec) as FileShareRequestPacket
+          })()
+        : (data as FileShareRequestPacket)
+
+      // 调用 sendSharedFile 把已暂存的文件分发给请求方
+      await this.sendSharedFile(
+        fromPeerId,
+        payload.transferId,
+        payload.fileName,
+        payload.fileSize,
+        payload.md5,
+      )
+    } catch (err) {
+      log.error('handleFileShareRequest failed:', err)
+    }
   }
 
   acceptTransfer(transferId: string, savePath: string): void {
