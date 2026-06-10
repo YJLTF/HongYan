@@ -95,6 +95,11 @@ class FriendDiscoveryService implements IFriendDiscoveryService {
   getFriend(peerId: string): Friend | undefined {
     return udpBroadcaster.getFriend(peerId)
   }
+
+  // V1.5.0: 列出「在线 + 携带 appVersion + 低于 targetVersion」的好友
+  getLowerVersionFriends(targetVersion: string): Friend[] {
+    return udpBroadcaster.getLowerVersionFriends(targetVersion)
+  }
 }
 
 export const friendDiscoveryService = new FriendDiscoveryService()

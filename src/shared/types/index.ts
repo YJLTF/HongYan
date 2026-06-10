@@ -46,6 +46,8 @@ export interface PresenceAnnouncement {
   // 旧版 V1.1.0 客户端不发送这两个字段，V1.2.0 接收时按 legacy 处理
   publicKey?: string
   signature?: string
+  // V1.5.0: 应用版本（用于收端判断「是否提示更新」）。旧版客户端不携带此字段
+  appVersion?: string
 }
 
 export interface Friend {
@@ -61,6 +63,8 @@ export interface Friend {
   publicKey?: string
   // V1.2.0: 标记签名不可验证的旧版客户端（warning 但不阻止）
   untrusted?: boolean
+  // V1.5.0: 好友当前的应用版本（来自 presence 包的 appVersion 字段；缺失视为 1.0.0）
+  appVersion?: string
 }
 
 // V1.4.0: 群成员
@@ -491,6 +495,17 @@ export interface IStorageService {
   deleteGroup(groupId: string): void
   // V1.4.0: 群消息（复用 ChatRecord，扩展支持 groupId）
   queryGroupChatRecords(groupId: string, limit?: number, offset?: number): ChatRecord[]
+  // V1.5.0: 发布方
+  savePublishedUpdate(record: PublishedUpdate): void
+  listPublishedUpdates(): PublishedUpdate[]
+  getPublishedUpdate(id: string): PublishedUpdate | undefined
+  incrementPublishedUpdateDownloadCount(id: string): void
+  findPublishedUpdateByVersion(version: string): PublishedUpdate | undefined
+  // V1.5.0: 收端
+  upsertAvailableUpdate(record: AvailableUpdate): void
+  listAvailableUpdates(): AvailableUpdate[]
+  setAvailableUpdateDismissed(publisherPeerId: string, targetVersion: string, dismissed: boolean): void
+  removeAvailableUpdate(publisherPeerId: string, targetVersion: string): void
 }
 
 export const MainToRendererChannels = {
@@ -513,6 +528,13 @@ export const MainToRendererChannels = {
   GROUP_MEMBER_CHANGED: 'group:member-changed',
   GROUP_MESSAGE_RECEIVED: 'group:message-received',
   GROUP_MESSAGE_STATUS_UPDATED: 'group:message-status-updated',
+  // V1.5.0: 版本分发相关推送
+  UPDATE_AVAILABLE: 'update:available',                  // 收端：发现新版本
+  UPDATE_DOWNLOAD_PROGRESS: 'update:download-progress',  // 收端：下载进度
+  UPDATE_DOWNLOAD_COMPLETE: 'update:download-complete',  // 收端：下载完成
+  UPDATE_DOWNLOAD_FAILED: 'update:download-failed',      // 收端：下载失败
+  UPDATE_PUBLISH_STATUS: 'update:publish-status',        // 发布方：状态变化
+  UPDATE_REMOVED: 'update:removed',                      // 收端：发布方停止
 } as const
 
 export const RendererToMainChannels = {
@@ -540,6 +562,18 @@ export const RendererToMainChannels = {
   GROUP_SEND_FILE: 'group:send-file',
   GROUP_UPDATE_NAME: 'group:update-name',
   FILE_REQUEST_GROUP_FILE: 'file:request-group-file',
+  // V1.5.0: 版本分发相关调用
+  UPDATE_PICK_FILES: 'update:pick-files',
+  UPDATE_START_PUBLISH: 'update:start-publish',
+  UPDATE_STOP_PUBLISH: 'update:stop-publish',
+  UPDATE_GET_PUBLISH_STATUS: 'update:get-publish-status',
+  UPDATE_LIST_PUBLISHED: 'update:list-published',
+  UPDATE_LIST_AVAILABLE: 'update:list-available',
+  UPDATE_DISMISS_AVAILABLE: 'update:dismiss-available',
+  UPDATE_START_DOWNLOAD: 'update:start-download',
+  UPDATE_CANCEL_DOWNLOAD: 'update:cancel-download',
+  UPDATE_OPEN_INSTALLER: 'update:open-installer',
+  UPDATE_GET_LOWER_VERSION_FRIENDS: 'update:get-lower-version-friends',
 } as const
 
 export const PROTOCOL_VERSION = 2
@@ -565,3 +599,100 @@ export const GROUP_PACKET_KINDS = {
 } as const
 
 export type GroupPacketKind = typeof GROUP_PACKET_KINDS[keyof typeof GROUP_PACKET_KINDS]
+
+// ============================================================
+// V1.5.0: 局域网版本分发相关类型
+// ============================================================
+
+// 单个分发包元信息（NSIS 或 Portable 任选其一，两项均可存在）
+export interface UpdatePackageMeta {
+  filename: string
+  size: number
+  sha256: string
+}
+
+// 发布方在 UDP 广播的版本公告载荷（不含签名/signature/publicKey 三字段由签名层加）
+export interface VersionAnnouncementPayload {
+  version: number                 // 协议版本（V1.5.0 = 3）
+  targetVersion: string           // 目标版本号（semver x.y.z）
+  publisherPeerId: string         // 发布方 peerId（收端用其作为唯一 key）
+  publisherNickname: string       // 发布方昵称（UI 展示）
+  httpPort: number                // 发布方 HTTP 服务端口
+  nsis?: UpdatePackageMeta        // NSIS 安装包
+  portable?: UpdatePackageMeta    // Portable 便携版
+  note?: string                   // 更新说明（≤500 字）
+  timestamp: number               // 防重放窗口
+  // V1.5.0: 当 httpPort=0 且 stopped=true 时，表示发布方主动停止
+  // 此时收端应从 availableUpdates 中移除该 publisherPeerId+targetVersion 记录
+  stopped?: boolean
+}
+
+// 完整签名后的 VersionAnnouncement（包络）
+export interface VersionAnnouncement extends VersionAnnouncementPayload {
+  publicKey: string
+  signature: string
+}
+
+// 收端入库的「可用更新」记录
+export interface AvailableUpdate {
+  publisherPeerId: string
+  publisherNickname: string
+  targetVersion: string
+  httpPort: number
+  publisherIp?: string            // 最近一次收到广播时的来源 IP（用于 HTTP GET）
+  nsis?: UpdatePackageMeta
+  portable?: UpdatePackageMeta
+  note?: string
+  receivedAt: number              // 最近一次收到广播的时间
+  // 同一发布方同一版本只保留一条；新广播来时只更新 receivedAt
+  dismissed?: boolean             // 用户主动忽略（不再提示）
+}
+
+// 发布方入库的「已发布更新」记录
+export interface PublishedUpdate {
+  id: string
+  version: string
+  nsis?: UpdatePackageMeta & { localPath: string }
+  portable?: UpdatePackageMeta & { localPath: string }
+  httpPort: number
+  publishedAt: number
+  stoppedAt?: number
+  downloadCount: number
+  note?: string
+}
+
+// 渲染端订阅的发布状态
+export interface PublishStatus {
+  running: boolean
+  httpPort?: number
+  publishedUpdateId?: string
+  targetVersion?: string
+  error?: string
+}
+
+// 收端下载进度
+export interface UpdateDownloadProgress {
+  jobId: string
+  packageType: 'nsis' | 'portable'
+  fileName: string
+  fileSize: number
+  downloaded: number
+  speed: number                   // bytes/s
+  status: 'downloading' | 'verifying' | 'completed' | 'failed' | 'cancelled'
+  savePath?: string
+  error?: string
+}
+
+// 版本发布包的选择（渲染端 → 主进程）
+export interface PickUpdateFilesResult {
+  nsis?: { filePath: string; size: number; sha256: string }
+  portable?: { filePath: string; size: number; sha256: string }
+}
+
+// 发布操作的入参（渲染端 → 主进程）
+export interface StartPublishInput {
+  targetVersion: string
+  nsis?: { filePath: string; size: number; sha256: string }
+  portable?: { filePath: string; size: number; sha256: string }
+  note?: string
+}

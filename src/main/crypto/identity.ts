@@ -29,6 +29,13 @@ function getIdentityKeyPath(): string {
 
 // 规范 JSON 序列化：key 按字典序排序，无空白
 // 用于签名输入，确保发送方/接收方序列化结果一致
+//
+// 关键约束：必须与 JSON.stringify 对 undefined 的处理一致——
+// 对象中值为 undefined 的 key 必须跳过（而不是序列化为 null），否则签名串与
+// 接收方 JSON.parse 后再 canonicalJSON 的结果不一致，导致校验必失败。
+// 典型场景：版本公告里 nsis/portable/note 任一为 undefined，发送方签名包含
+// "note":null，但 JSON.stringify 丢弃 note 字段，接收方 canonicalJSON 也不会
+// 重建该 key——结果就是收端永远验签失败。
 export function canonicalJSON(obj: unknown): string {
   if (obj === null || obj === undefined) return 'null'
   if (typeof obj === 'number' || typeof obj === 'boolean') return JSON.stringify(obj)
@@ -37,8 +44,11 @@ export function canonicalJSON(obj: unknown): string {
     return '[' + obj.map(canonicalJSON).join(',') + ']'
   }
   if (typeof obj === 'object') {
-    const keys = Object.keys(obj as Record<string, unknown>).sort()
-    const parts = keys.map((k) => JSON.stringify(k) + ':' + canonicalJSON((obj as Record<string, unknown>)[k]))
+    const record = obj as Record<string, unknown>
+    const keys = Object.keys(record)
+      .filter((k) => record[k] !== undefined)
+      .sort()
+    const parts = keys.map((k) => JSON.stringify(k) + ':' + canonicalJSON(record[k]))
     return '{' + parts.join(',') + '}'
   }
   return JSON.stringify(obj)

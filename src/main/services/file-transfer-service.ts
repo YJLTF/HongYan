@@ -9,6 +9,7 @@ import { createPacket } from '../network/protocol'
 import { getDataDir } from '../storage/database'
 import { FILE_CHUNK_SIZE, MAX_FILE_SIZE, FILES_DIR } from '@shared/constants'
 import { pushFileProgress, pushFileCompleted, pushFileFailed, pushFileUpdated } from '../ipc/ipc-push'
+import { computeFileMd5 } from '../utils/file-hash'
 import type {
   IFileTransferService,
   FileTransferRecord,
@@ -76,7 +77,7 @@ class FileTransferService implements IFileTransferService {
 
     const transferId = crypto.randomUUID()
     const fileName = path.basename(filePath)
-    const md5 = this.calculateMD5(filePath)
+    const md5 = await this.calculateMD5(filePath)
     const selfPeerId = storageService.loadConfig()?.peerId || ''
 
     // 将文件复制到 FILES_DIR 目录，以便后续发送数据块
@@ -448,8 +449,8 @@ class FileTransferService implements IFileTransferService {
     })
   }
 
-  private calculateMD5(filePath: string): string {
-    return crypto.createHash('md5').update(fs.readFileSync(filePath)).digest('hex')
+  private async calculateMD5(filePath: string): Promise<string> {
+    return computeFileMd5(filePath)
   }
 }
 

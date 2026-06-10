@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, dialog, app } from 'electron'
+import { ipcMain, BrowserWindow, dialog, app, shell } from 'electron'
 import os from 'os'
 import path from 'path'
 import fs from 'fs'
@@ -6,6 +6,8 @@ import { friendDiscoveryService } from '../services/friend-discovery-service'
 import { messageService } from '../services/message-service'
 import { fileTransferService } from '../services/file-transfer-service'
 import { groupService } from '../services/group-service'
+import { updatePublisher, computeFileSha256, getFileSize } from '../services/update-publisher'
+import { updateDownloader } from '../services/update-downloader'
 import { storageService } from '../storage/storage-service'
 import { getDataDir } from '../storage/database'
 import { udpBroadcaster } from '../network/udp-broadcaster'
@@ -19,42 +21,14 @@ import type {
   Group,
   FileShareRequestPacket,
   FileTransferRecord,
+  StartPublishInput,
 } from '@shared/types'
+import { getAppVersion } from '../utils/app-info'
 import log from 'electron-log'
 
-// 读取应用版本号
-// 在 packaged build 中 app.getVersion() 直接返回 asar 中 package.json 的 version
-// 但在 dev/test 模式下（npx electron dist/main/index.js）Electron 可能找不到 app 自己的
-// package.json，app.getVersion() 会回退到 process.versions.electron
-// 因此先用 process.versions.electron 对比检测，命中则直接读 package.json 兜底
-function readAppVersion(): string {
-  try {
-    const v = app.getVersion()
-    if (v && v !== process.versions.electron) {
-      return v
-    }
-  } catch {
-    // ignore
-  }
-
-  const candidates = [
-    path.join(app.getAppPath(), 'package.json'),
-    path.join(__dirname, '../../package.json'),
-    path.join(__dirname, '../../../package.json'),
-    path.join(process.cwd(), 'package.json'),
-  ]
-  for (const p of candidates) {
-    try {
-      if (fs.existsSync(p)) {
-        const pkg = JSON.parse(fs.readFileSync(p, 'utf-8')) as { version?: string }
-        if (pkg.version) return pkg.version
-      }
-    } catch {
-      // try next candidate
-    }
-  }
-  return 'unknown'
-}
+// V1.5.0 合并: 关于页 + 发布页共用 app:get-version
+// getAppVersion() 内部已备忘录化，多个组件多次调用只解析一次 package.json
+// 详细 fallback 逻辑见 utils/app-info.ts
 
 export function registerIpcHandlers(): void {
   ipcMain.handle('friend:scan-segment', async (_event, cidr: string) => {
@@ -97,7 +71,6 @@ export function registerIpcHandlers(): void {
   // 保存头像（将图片转换为 base64）
   ipcMain.handle('avatar:save', async (_event, filePath: string) => {
     try {
-      const fs = require('fs')
       const imageBuffer = fs.readFileSync(filePath)
       const base64Image = imageBuffer.toString('base64')
       return `data:image/png;base64,${base64Image}`
@@ -249,7 +222,6 @@ export function registerIpcHandlers(): void {
   // 打开文件位置
   ipcMain.handle('file:open-location', async (_event, filePath: string) => {
     try {
-      const { shell } = require('electron')
       await shell.showItemInFolder(filePath)
     } catch (err) {
       log.error('Failed to open file location:', err)
@@ -276,7 +248,7 @@ export function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('app:get-version', () => {
-    const v = readAppVersion()
+    const v = getAppVersion()
     log.info('App version requested:', v, 'electron:', process.versions.electron)
     return v
   })
@@ -503,6 +475,156 @@ export function registerIpcHandlers(): void {
       return { success: true }
     } catch (err) {
       log.error('Update group name failed:', err)
+      return { error: (err as Error).message }
+    }
+  })
+
+  // ============================================================
+  // V1.5.0: 版本分发 IPC
+  // ============================================================
+
+  ipcMain.handle(RendererToMainChannels.UPDATE_GET_LOWER_VERSION_FRIENDS, (_event, targetVersion: string) => {
+    return friendDiscoveryService.getLowerVersionFriends(targetVersion)
+  })
+
+  // 选择文件并计算元数据（SHA-256 + size）
+  ipcMain.handle(RendererToMainChannels.UPDATE_PICK_FILES, async () => {
+    const result = await dialog.showOpenDialog({
+      title: '选择分发包（可多选）',
+      properties: ['openFile'],
+      filters: [
+        { name: '可执行文件', extensions: ['exe'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+    })
+    if (result.canceled || result.filePaths.length === 0) return { canceled: true }
+    const files: Array<{ filePath: string; size: number; sha256: string }> = []
+    for (const fp of result.filePaths) {
+      try {
+        const size = await getFileSize(fp)
+        const sha256 = await computeFileSha256(fp)
+        files.push({ filePath: fp, size, sha256 })
+      } catch (err) {
+        log.error('Failed to inspect file:', fp, err)
+      }
+    }
+    return { canceled: false, files }
+  })
+
+  ipcMain.handle(RendererToMainChannels.UPDATE_START_PUBLISH, async (_event, input: StartPublishInput) => {
+    try {
+      const rec = await updatePublisher.startPublish(input)
+      return { success: true, record: rec }
+    } catch (err) {
+      log.error('Start publish failed:', err)
+      return { error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle(RendererToMainChannels.UPDATE_STOP_PUBLISH, async () => {
+    try {
+      await updatePublisher.stopPublish()
+      return { success: true }
+    } catch (err) {
+      log.error('Stop publish failed:', err)
+      return { error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle(RendererToMainChannels.UPDATE_GET_PUBLISH_STATUS, () => {
+    return updatePublisher.getStatus()
+  })
+
+  ipcMain.handle(RendererToMainChannels.UPDATE_LIST_PUBLISHED, () => {
+    return updatePublisher.listPublished()
+  })
+
+  // V1.5.0: 删除历史发布记录
+  ipcMain.handle('update:delete-published', (_event, id: string) => {
+    try {
+      storageService.deletePublishedUpdate(id)
+      return { success: true }
+    } catch (err) {
+      log.error('Delete published failed:', err)
+      return { error: (err as Error).message }
+    }
+  })
+
+  // 重新广播（如果是已停止的发布，会重启 HTTP 服务再广播；要求本地包文件仍在）
+  ipcMain.handle('update:rebroadcast', async (_event, id: string) => {
+    try {
+      await updatePublisher.rebroadcast(id)
+      return { success: true }
+    } catch (err) {
+      log.error('Rebroadcast failed:', err)
+      return { error: (err as Error).message }
+    }
+  })
+
+  // ============================================================
+  // V1.5.0: 收端下载 / 安装 IPC
+  // ============================================================
+
+  ipcMain.handle(RendererToMainChannels.UPDATE_LIST_AVAILABLE, () => {
+    return storageService.listAvailableUpdates()
+  })
+
+  ipcMain.handle(RendererToMainChannels.UPDATE_DISMISS_AVAILABLE, (_event, publisherPeerId: string, targetVersion: string) => {
+    try {
+      storageService.setAvailableUpdateDismissed(publisherPeerId, targetVersion, true)
+      return { success: true }
+    } catch (err) {
+      log.error('Dismiss failed:', err)
+      return { error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle(RendererToMainChannels.UPDATE_START_DOWNLOAD, async (
+    _event,
+    jobId: string,
+    publisherIp: string,
+    httpPort: number,
+    packageType: 'nsis' | 'portable',
+    fileName: string,
+    fileSize: number,
+    sha256: string
+  ) => {
+    try {
+      // 后台执行下载，状态走 push 事件
+      void updateDownloader.download({
+        jobId, publisherIp, httpPort, packageType, fileName, fileSize, sha256
+      }).then((savePath) => {
+        log.info('Download finished for jobId=', jobId, '→', savePath)
+      }).catch((err) => {
+        log.error('Download failed for jobId=', jobId, ':', err)
+        try {
+          const { pushUpdateDownloadFailed } = require('./ipc-push')
+          pushUpdateDownloadFailed({ jobId, packageType, fileName, error: (err as Error).message })
+        } catch { /* ignore */ }
+      })
+      return { success: true, jobId }
+    } catch (err) {
+      log.error('Start download failed:', err)
+      return { error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle(RendererToMainChannels.UPDATE_CANCEL_DOWNLOAD, (_event, jobId: string) => {
+    try {
+      const ok = updateDownloader.cancel(jobId)
+      return { success: ok }
+    } catch (err) {
+      log.error('Cancel download failed:', err)
+      return { error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle(RendererToMainChannels.UPDATE_OPEN_INSTALLER, (_event, savePath: string) => {
+    try {
+      updateDownloader.openInstaller(savePath)
+      return { success: true }
+    } catch (err) {
+      log.error('Open installer failed:', err)
       return { error: (err as Error).message }
     }
   })

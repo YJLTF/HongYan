@@ -47,6 +47,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useFriendStore } from '../stores/friend-store'
 import { useChatStore } from '../stores/chat-store'
+import { formatSize } from '@shared/format'
 
 interface Notification {
   id: string
@@ -184,13 +185,6 @@ onMounted(() => {
 onUnmounted(() => {
   cleanupFunctions.forEach(fn => fn())
 })
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
-  if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB'
-  return (bytes / 1073741824).toFixed(1) + ' GB'
-}
 
 // 暴露方法供外部调用
 defineExpose({

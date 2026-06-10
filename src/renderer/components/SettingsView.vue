@@ -1,18 +1,10 @@
 <template>
-  <div class="settings-modal" v-if="visible">
-    <div class="overlay" @click="$emit('close')"></div>
-    <div class="dialog">
-      <div class="dialog-header">
-        <h3>设置</h3>
-        <button class="close-btn" @click="$emit('close')">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"/>
-            <line x1="6" y1="6" x2="18" y2="18"/>
-          </svg>
-        </button>
-      </div>
+  <div class="settings-view">
+    <div class="view-header">
+      <h3>设置</h3>
+    </div>
 
-      <div class="dialog-body">
+    <div class="view-body">
         <!-- 左侧纵向 tab 导航 -->
         <nav class="tab-nav">
           <button
@@ -20,11 +12,13 @@
             :key="tab.key"
             class="tab-item"
             :class="{ active: activeTab === tab.key }"
-            @click="activeTab = tab.key"
+            @click="handleTabClick(tab.key)"
           >
             <span class="tab-icon" v-html="tab.icon"></span>
             <span class="tab-label">{{ tab.label }}</span>
-            <span v-if="tab.badge" class="tab-badge">V1.3.0</span>
+            <span v-if="tab.key === 'updates' && !updatesUnlocked" class="tab-lock" title="需要密码">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </span>
           </button>
         </nav>
 
@@ -268,6 +262,37 @@
             </div>
           </section>
 
+          <!-- 版本发布 -->
+          <section v-show="activeTab === 'updates'" class="settings-section updates-section">
+            <template v-if="updatesUnlocked">
+              <UpdatePublish />
+            </template>
+            <template v-else>
+              <div class="lock-panel">
+                <div class="lock-icon">
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                  </svg>
+                </div>
+                <h4 class="lock-title">版本发布需要密码</h4>
+                <p class="lock-hint">此功能仅限管理员使用，请输入密码后继续</p>
+                <form class="lock-form" @submit.prevent="submitUpdatesPassword">
+                  <input
+                    type="password"
+                    v-model="updatesPasswordInput"
+                    placeholder="请输入密码"
+                    autocomplete="current-password"
+                    class="lock-input"
+                    :class="{ invalid: updatesPasswordError }"
+                  />
+                  <button type="submit" class="btn-primary lock-submit" :disabled="!updatesPasswordInput">解锁</button>
+                </form>
+                <p v-if="updatesPasswordError" class="lock-error">{{ updatesPasswordError }}</p>
+              </div>
+            </template>
+          </section>
+
           <!-- 关于 -->
           <section v-show="activeTab === 'about'" class="settings-section">
             <h4 class="section-title">关于</h4>
@@ -282,7 +307,7 @@
                 <div v-if="logoLoadFailed" class="about-logo-placeholder">鸿</div>
               </div>
               <p class="app-name">鸿雁 (HongYan)</p>
-              <p class="version">版本 {{ appVersion }}</p>
+              <p class="version">版本 {{ appStore.version || '—' }}</p>
               <p class="description">局域网点对点即时通讯工具</p>
               <div class="about-divider"></div>
               <p class="copyright">Copyright © 2026 HongYan</p>
@@ -290,7 +315,6 @@
           </section>
         </div>
       </div>
-    </div>
   </div>
 </template>
 
@@ -298,15 +322,20 @@
 import { ref, onMounted } from 'vue'
 import { useConfigStore } from '../stores/config-store'
 import { useFriendStore } from '../stores/friend-store'
+import { useAppStore } from '../stores/app-store'
+import UpdatePublish from './UpdatePublish.vue'
 // V1.3.0: 用 ?url 显式声明为 URL 资源，让 Vite 不把它当 JS 模块解析
 // public 目录下的资源在 dev 由 Vite dev server 提供，prod 拷贝到 dist 根
 import appIconUrl from '/icons/icon-256x256.png?url'
 
-const props = defineProps<{ visible: boolean }>()
-const emit = defineEmits(['close'])
+// 版本发布 tab 密码门控 (V1.5.x)：app 会话内验证一次即可
+// 使用模块级 ref，让验证状态在 SettingsView 多次挂载/卸载之间持久
+const UPDATES_PASSWORD = 'Sict@@9437'
+const updatesUnlocked = ref(false)
 
 const configStore = useConfigStore()
 const friendStore = useFriendStore()
+const appStore = useAppStore()
 
 interface LocalConfig {
   nickname: string
@@ -336,9 +365,32 @@ const localConfig = ref<LocalConfig>({
   dndEnd: configStore.dndEnd,
 })
 
-type TabKey = 'profile' | 'notifications' | 'storage' | 'network' | 'about'
+type TabKey = 'profile' | 'notifications' | 'storage' | 'network' | 'updates' | 'about'
 
 const activeTab = ref<TabKey>('profile')
+
+// 版本发布密码输入框状态
+const updatesPasswordInput = ref('')
+const updatesPasswordError = ref('')
+
+function handleTabClick(key: TabKey) {
+  activeTab.value = key
+  if (key === 'updates' && !updatesUnlocked.value) {
+    updatesPasswordInput.value = ''
+    updatesPasswordError.value = ''
+  }
+}
+
+function submitUpdatesPassword() {
+  if (updatesPasswordInput.value === UPDATES_PASSWORD) {
+    updatesUnlocked.value = true
+    updatesPasswordError.value = ''
+    updatesPasswordInput.value = ''
+  } else {
+    updatesPasswordError.value = '密码错误，请重新输入'
+    updatesPasswordInput.value = ''
+  }
+}
 
 // 内联 SVG 图标（heroicons-style，stroke-width=2）
 const tabs: { key: TabKey; label: string; icon: string; badge?: boolean }[] = [
@@ -350,7 +402,6 @@ const tabs: { key: TabKey; label: string; icon: string; badge?: boolean }[] = [
   {
     key: 'notifications',
     label: '提醒',
-    badge: true,
     icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
   },
   {
@@ -364,6 +415,11 @@ const tabs: { key: TabKey; label: string; icon: string; badge?: boolean }[] = [
     icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
   },
   {
+    key: 'updates',
+    label: '版本发布',
+    icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>',
+  },
+  {
     key: 'about',
     label: '关于',
     icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
@@ -372,7 +428,6 @@ const tabs: { key: TabKey; label: string; icon: string; badge?: boolean }[] = [
 
 const scanSegmentsText = ref('')
 const isRefreshing = ref(false)
-const appVersion = ref('—')
 const logoLoadFailed = ref(false)
 // V1.2.0: 心跳间隔预设（字符串键方便 v-model 绑定）
 const heartbeatPreset = ref('60000')
@@ -412,17 +467,11 @@ onMounted(async () => {
     }
   }
 
-  try {
-    const version = await window.electronAPI.invoke('app:get-version')
-    if (typeof version === 'string' && version.length > 0) {
-      appVersion.value = version
-    }
-  } catch (err) {
-    console.error('Failed to get app version:', err)
-  }
-
   // V1.2.0: 加载心跳配置
   heartbeatPreset.value = String(config?.heartbeatIntervalMs ?? 60000)
+
+  // V1.5.0 合并: 关于页与发布页共用同一份版本号（appStore 内部缓存）
+  appStore.loadVersion()
 })
 
 async function saveConfig() {
@@ -620,88 +669,33 @@ function getInitials(name: string): string {
 </script>
 
 <style scoped>
-.settings-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 1000;
-}
-
-.overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
-}
-
-.dialog {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background: #fff;
-  border-radius: 12px;
-  width: 720px;
-  max-height: 85vh;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+.settings-view {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  animation: modalSlideIn 0.3s ease-out;
+  min-width: 0;
+  height: 100%;
+  background: #fff;
 }
 
-@keyframes modalSlideIn {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -48%);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, -50%);
-  }
-}
-
-.dialog-header {
+.view-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 20px 24px;
+  padding: 18px 24px;
   border-bottom: 1px solid #e8e8e8;
   flex-shrink: 0;
+  background: linear-gradient(180deg, #fafafa 0%, #fff 100%);
 }
 
-.dialog-header h3 {
+.view-header h3 {
   margin: 0;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   color: #333;
 }
 
-.close-btn {
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: #999;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s;
-}
-
-.close-btn:hover {
-  background: #f5f5f5;
-  color: #333;
-}
-
 /* 主体：左 tab + 右内容 */
-.dialog-body {
+.view-body {
   display: flex;
   flex: 1;
   min-height: 0;
@@ -784,12 +778,104 @@ function getInitials(name: string): string {
   letter-spacing: 0.3px;
 }
 
+.tab-lock {
+  flex-shrink: 0;
+  color: #bbb;
+  display: flex;
+  align-items: center;
+}
+
+.tab-item.active .tab-lock {
+  color: #07c160;
+}
+
 /* 右侧内容区 */
 .tab-content {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
   padding: 24px 28px;
+}
+
+/* 版本发布 tab：让子组件自己控制内边距 */
+.updates-section {
+  padding: 0;
+  margin: -24px -28px;
+  height: calc(100% + 48px);
+  display: flex;
+  flex-direction: column;
+}
+
+/* 密码锁屏 */
+.lock-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 32px;
+  text-align: center;
+}
+
+.lock-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(7, 193, 96, 0.1) 0%, rgba(102, 126, 234, 0.1) 100%);
+  color: #07c160;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 18px;
+}
+
+.lock-title {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.lock-hint {
+  margin: 0 0 24px;
+  font-size: 13px;
+  color: #999;
+}
+
+.lock-form {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  max-width: 320px;
+}
+
+.lock-input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.lock-input:focus {
+  border-color: #07c160;
+  box-shadow: 0 0 0 4px rgba(7, 193, 96, 0.12);
+}
+
+.lock-input.invalid {
+  border-color: #f5222d;
+}
+
+.lock-submit {
+  white-space: nowrap;
+}
+
+.lock-error {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: #f5222d;
 }
 
 .settings-section {

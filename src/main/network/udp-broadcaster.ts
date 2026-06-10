@@ -6,11 +6,13 @@ import {
   SIGNATURE_MAX_AGE_MS,
   calculateOnlineTimeoutMs,
 } from '@shared/constants'
-import { PROTOCOL_VERSION } from '@shared/types'
-import type { PresenceAnnouncement, Friend } from '@shared/types'
+import { PROTOCOL_VERSION, GROUP_PROTOCOL_VERSION } from '@shared/types'
+import type { PresenceAnnouncement, Friend, VersionAnnouncement, VersionAnnouncementPayload } from '@shared/types'
 import { storageService } from '../storage/storage-service'
 import { getNetworkInterfaces } from './network-utils'
 import { initIdentity, signPayload, verifyPayload } from '../crypto/identity'
+import { isVersionLower, isVersionHigher } from '@shared/version'
+import { getAppVersion } from '../utils/app-info'
 import log from 'electron-log'
 
 // 检测是否处于多实例/开发模式
@@ -39,8 +41,13 @@ export type BroadcastReason =
 const LEGACY_PROTOCOL_VERSION = 1
 const ACCEPTABLE_VERSIONS = new Set([LEGACY_PROTOCOL_VERSION, PROTOCOL_VERSION])
 
+// V1.5.0: 版本公告协议版本
+const VERSION_ANNOUNCEMENT_PROTOCOL_VERSION = GROUP_PROTOCOL_VERSION // 3
+
 // 签名载荷：announcement 中除 signature 本身外的所有字段
 // 公共字段包括 publicKey（用于验签），但 publicKey 不参与自签名（避免循环）
+// V1.5.0: 新增 appVersion。V1.2.0~V1.4.0 客户端不发送此字段，但接收方按"非签名/非公钥字段集合"
+// 提取，V1.5.0 的存在/不存在会自动适配
 type SignablePayload = {
   version: number
   peerId: string
@@ -48,6 +55,7 @@ type SignablePayload = {
   ip: string
   tcpPort: number
   timestamp: number
+  appVersion?: string
 }
 
 class UdpBroadcaster {
@@ -69,11 +77,17 @@ class UdpBroadcaster {
   private onFriendOnline: ((friend: Friend) => void) | null = null
   private onFriendOffline: ((peerId: string) => void) | null = null
   private onFriendUpdated: ((friend: Friend) => void) | null = null
+  // V1.5.0: 收到版本公告（来自其他用户的"我刚发布了 X.Y.Z"广播）
+  private onVersionAnnouncement:
+    | ((payload: VersionAnnouncement, fromIp: string) => void)
+    | null = null
 
   start(peerId: string, nickname: string, tcpPort: number): void {
     this.selfPeerId = peerId
     this.selfNickname = nickname
     this.selfTcpPort = tcpPort
+    // V1.5.0 合并: 版本号直接读自 getAppVersion()（已备忘录化），不再缓存副本
+    log.info('Self app version:', getAppVersion(), 'electron:', process.versions.electron)
 
     // V1.2.0: 初始化 Ed25519 身份密钥对（首次启动自动生成）
     try {
@@ -258,6 +272,8 @@ class UdpBroadcaster {
       ip: this.getOwnIp(),
       tcpPort: this.selfTcpPort,
       timestamp,
+      // V1.5.0: 携带当前 appVersion 供收端判断「是否提示更新」
+      appVersion: getAppVersion(),
     }
 
     const announcement: PresenceAnnouncement = { ...signable }
@@ -297,6 +313,11 @@ class UdpBroadcaster {
       log.info('Received UDP message from', rinfo.address, 'port:', rinfo.port, 'size:', rinfo.size)
       const packet = JSON.parse(msg.toString('utf-8'))
       log.info('Packet kind:', packet.kind, 'peerId:', packet.data?.peerId)
+      // V1.5.0: 路由版本公告包到独立处理函数
+      if (packet.kind === ANNOUNCEMENT_KIND.VERSION) {
+        this.handleVersionAnnouncement(packet, rinfo)
+        return
+      }
       if (packet.kind !== ANNOUNCEMENT_KIND.PRESENCE && packet.kind !== ANNOUNCEMENT_KIND.LEAVING) return
       const announcement = packet.data as PresenceAnnouncement
       // V1.2.0: 接受 V1 旧协议（无签名）和 V2 当前协议（有签名），拒绝未来未知版本
@@ -373,6 +394,8 @@ class UdpBroadcaster {
         lastSeen: Date.now(),
         publicKey: signatureValid === true ? announcement.publicKey : undefined,
         untrusted: signatureValid === null,
+        // V1.5.0: 携带对方应用版本（旧版客户端不发送此字段，视为 undefined）
+        appVersion: announcement.appVersion,
       }
 
       const existing = this.friends.get(friend.peerId)
@@ -381,7 +404,8 @@ class UdpBroadcaster {
       const infoChanged = !!existing && existing.online && (
         existing.nickname !== friend.nickname ||
         existing.ip !== friend.ip ||
-        existing.tcpPort !== friend.tcpPort
+        existing.tcpPort !== friend.tcpPort ||
+        existing.appVersion !== friend.appVersion
       )
 
       log.info('Processing friend:', friend.peerId, 'isNew:', isNew, 'justCameOnline:', justCameOnline, 'infoChanged:', infoChanged)
@@ -443,6 +467,182 @@ class UdpBroadcaster {
       }
     }
     return '0.0.0.0'
+  }
+
+  // === V1.5.0: 版本公告相关 ===
+
+  // 注册版本公告回调（外部模块通常在 update-publisher / update-downloader 中注册）
+  setVersionAnnouncementCallback(
+    cb: (payload: VersionAnnouncement, fromIp: string) => void
+  ): void {
+    this.onVersionAnnouncement = cb
+  }
+
+  // V1.5.0: 广播一次"我刚发布了 X.Y.Z"公告
+  // 复用 Ed25519 签名（payload 与 presence 同源），仅 kind 不同
+  broadcastVersionAnnouncement(payload: VersionAnnouncementPayload): void {
+    if (!this.socket) {
+      log.warn('Cannot broadcast version announcement: socket not started')
+      return
+    }
+    if (!this.selfPublicKey) {
+      log.warn('Cannot broadcast version announcement: no identity key')
+      return
+    }
+    const signable: VersionAnnouncementPayload = {
+      ...payload,
+      version: VERSION_ANNOUNCEMENT_PROTOCOL_VERSION,
+    }
+    let signature = ''
+    try {
+      signature = signPayload(signable as unknown as Record<string, unknown>)
+    } catch (err) {
+      log.error('Failed to sign version announcement:', err)
+      return
+    }
+    const full: VersionAnnouncement = {
+      ...signable,
+      publicKey: this.selfPublicKey,
+      signature,
+    }
+    const data = JSON.stringify({ kind: ANNOUNCEMENT_KIND.VERSION, data: full })
+    const buf = Buffer.from(data, 'utf-8')
+
+    const segments = getNetworkInterfaces()
+    const ports = getScanUdpPorts()
+    for (const seg of segments) {
+      for (const port of ports) {
+        const targets: Array<{ address: string; port: number }> = [
+          { address: seg.broadcast, port },
+        ]
+        if (isMultiInstanceMode()) {
+          targets.push({ address: '127.0.0.1', port })
+        }
+        for (const t of targets) {
+          this.socket.send(buf, 0, buf.length, t.port, t.address, (err) => {
+            if (err) log.debug('Version-announcement send error:', err)
+          })
+        }
+      }
+    }
+    log.info('Broadcast version announcement: targetVersion=', payload.targetVersion,
+      'httpPort=', payload.httpPort,
+      'nsis=', payload.nsis?.filename || '(none)',
+      'portable=', payload.portable?.filename || '(none)')
+  }
+
+  // V1.5.0: 收端处理版本公告
+  private handleVersionAnnouncement(
+    packet: { kind: string; data: unknown },
+    rinfo: { address: string; port: number; size: number }
+  ): void {
+    const data = (packet.data || {}) as Partial<VersionAnnouncement> & { version?: number; timestamp?: number }
+    if (typeof data.version !== 'number' || typeof data.timestamp !== 'number') {
+      log.warn('Dropping malformed version-announcement from', rinfo.address)
+      return
+    }
+    if (data.version > VERSION_ANNOUNCEMENT_PROTOCOL_VERSION) {
+      log.warn('Dropping future version-announcement, version:', data.version)
+      return
+    }
+    const now = Date.now()
+    if (Math.abs(now - data.timestamp) > SIGNATURE_MAX_AGE_MS) {
+      log.warn('Dropping version-announcement with stale timestamp, skew:', Math.abs(now - data.timestamp), 'ms')
+      return
+    }
+    if (!data.publicKey || !data.signature) {
+      log.warn('Version-announcement missing signature/publicKey from', rinfo.address)
+      return
+    }
+    // 提取 signable（除 publicKey/signature 外的所有字段）
+    const { publicKey: _pk, signature: _sig, ...signable } = data
+    const ok = verifyPayload(
+      signable as unknown as Record<string, unknown>,
+      data.signature,
+      data.publicKey
+    )
+    if (!ok) {
+      log.warn('Version-announcement signature verification FAILED from', rinfo.address)
+      return
+    }
+    // 必须是来自其他 peer 的公告
+    if (data.publisherPeerId === this.selfPeerId) {
+      log.debug('Ignoring own version-announcement echo')
+      return
+    }
+    // V1.5.0 修复: 放宽过滤——只在本机版本严格高于目标版本时丢弃
+    // (旧逻辑 `self >= target` 丢弃，导致同版本重广播也看不到，测试时无法验证通路)
+    // 停止公告无论如何都放行（收端业务层需要清理记录）
+    if (!data.stopped && data.targetVersion && isVersionHigher(getAppVersion(), data.targetVersion)) {
+      log.info('Ignoring version-announcement for version < self:', data.targetVersion)
+      return
+    }
+    log.info('Received version-announcement from', data.publisherPeerId,
+      'targetVersion=', data.targetVersion, 'httpPort=', data.httpPort,
+      'stopped=', !!data.stopped, 'selfVersion=', getAppVersion())
+    this.onVersionAnnouncement?.(signable as unknown as VersionAnnouncement, rinfo.address)
+  }
+
+  // V1.5.0: 获取所有"已知 appVersion 且低于 targetVersion"的好友
+  // 用于发布方在 UI 展示"将向 N 个低版本好友广播"
+  getLowerVersionFriends(targetVersion: string): Friend[] {
+    return this.getFriends().filter(
+      (f) => f.online && f.appVersion && isVersionLower(f.appVersion, targetVersion)
+    )
+  }
+
+  // V1.5.0 合并: 移除 getSelfAppVersion() 透传方法（getAppVersion() 已是唯一来源）
+  // V1.5.0: 广播"我刚停止发布"的公告
+  // 不带任何包信息，httpPort=0、stopped=true；收端凭此清理 availableUpdates
+  broadcastVersionAnnouncementStopped(targetVersion: string): void {
+    if (!this.socket) return
+    if (!this.selfPublicKey) {
+      log.warn('Cannot broadcast stop announcement: no identity key')
+      return
+    }
+    const config = storageService.loadConfig()
+    const payload: VersionAnnouncementPayload = {
+      version: VERSION_ANNOUNCEMENT_PROTOCOL_VERSION,
+      targetVersion,
+      publisherPeerId: this.selfPeerId,
+      publisherNickname: config?.nickname || 'User',
+      httpPort: 0,
+      stopped: true,
+      timestamp: Date.now(),
+    }
+    let signature = ''
+    try {
+      signature = signPayload(payload as unknown as Record<string, unknown>)
+    } catch (err) {
+      log.error('Failed to sign stop announcement:', err)
+      return
+    }
+    const full: VersionAnnouncement = {
+      ...payload,
+      publicKey: this.selfPublicKey,
+      signature,
+    }
+    const data = JSON.stringify({ kind: ANNOUNCEMENT_KIND.VERSION, data: full })
+    const buf = Buffer.from(data, 'utf-8')
+
+    const segments = getNetworkInterfaces()
+    const ports = getScanUdpPorts()
+    for (const seg of segments) {
+      for (const port of ports) {
+        const targets: Array<{ address: string; port: number }> = [
+          { address: seg.broadcast, port },
+        ]
+        if (isMultiInstanceMode()) {
+          targets.push({ address: '127.0.0.1', port })
+        }
+        for (const t of targets) {
+          this.socket.send(buf, 0, buf.length, t.port, t.address, (err) => {
+            if (err) log.debug('Stop-announcement send error:', err)
+          })
+        }
+      }
+    }
+    log.info('Broadcast stop announcement for version:', targetVersion)
   }
 }
 

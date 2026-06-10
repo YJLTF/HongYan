@@ -54,6 +54,7 @@ import type {
   EncryptedData,
 } from '@shared/types'
 import { GroupRole, ConversationType, MessageType, MessageStatus } from '@shared/types'
+import { computeFileMd5 } from '../utils/file-hash'
 import log from 'electron-log'
 
 class GroupService implements IGroupService {
@@ -934,13 +935,7 @@ class GroupService implements IGroupService {
   }
 
   private calculateFileMD5(filePath: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const hash = crypto.createHash('md5')
-      const stream = fs.createReadStream(filePath)
-      stream.on('data', (chunk) => hash.update(chunk))
-      stream.on('end', () => resolve(hash.digest('hex')))
-      stream.on('error', reject)
-    })
+    return computeFileMd5(filePath)
   }
 
   // ============================================================
