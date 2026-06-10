@@ -125,3 +125,31 @@ export function pushGroupMessageStatusUpdated(payload: {
 }): void {
   pushEvent(MainToRendererChannels.GROUP_MESSAGE_STATUS_UPDATED, payload)
 }
+
+// ============================================================
+// V1.5.0: 版本分发推送
+// ============================================================
+
+export function pushUpdateAvailable(payload: any): void {
+  pushEvent(MainToRendererChannels.UPDATE_AVAILABLE, payload)
+}
+
+export function pushUpdateRemoved(publisherPeerId: string, targetVersion: string): void {
+  pushEvent(MainToRendererChannels.UPDATE_REMOVED, { publisherPeerId, targetVersion })
+}
+
+export function pushUpdateDownloadProgress(progress: any): void {
+  pushEvent(MainToRendererChannels.UPDATE_DOWNLOAD_PROGRESS, progress)
+}
+
+export function pushUpdateDownloadComplete(payload: any): void {
+  pushEvent(MainToRendererChannels.UPDATE_DOWNLOAD_COMPLETE, payload)
+}
+
+export function pushUpdateDownloadFailed(payload: any): void {
+  pushEvent(MainToRendererChannels.UPDATE_DOWNLOAD_FAILED, payload)
+}
+
+export function pushUpdatePublishStatus(status: any): void {
+  pushEvent(MainToRendererChannels.UPDATE_PUBLISH_STATUS, status)
+}

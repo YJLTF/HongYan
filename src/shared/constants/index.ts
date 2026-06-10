@@ -45,6 +45,8 @@ export const SIGNATURE_MAX_AGE_MS = 300000
 export const ANNOUNCEMENT_KIND = {
   PRESENCE: 'announcement',
   LEAVING: 'announcement-leaving',
+  // V1.5.0: 版本发布广播（携带 nsis/portable 元信息 + HTTP 端口）
+  VERSION: 'version-announcement',
 } as const
 export const KEY_EXPIRY_MS = 3600000
 export const FILE_CHUNK_SIZE = 65536
@@ -90,4 +92,20 @@ export const GROUP_MESSAGE_MAX_RETRIES = 3
 // 多实例模式（设置了 HONGYAN_DATA_DIR）下扫描范围
 export const MULTI_INSTANCE_UDP_PORTS = [19876, 19878, 19880]
 export const MULTI_INSTANCE_UDP_SCAN_PORTS = [19876, 19878, 19880]
+
+// ============================================================
+// V1.5.0: 局域网版本分发
+// ============================================================
+
+// 发布方开 HTTP 文件服务用的端口（避开 UDP 19876、TCP 19877-19886 现有范围）
+export const HTTP_SERVER_PORT_DEFAULT = 19890
+export const HTTP_SERVER_PORT_MAX_TRY = 10
+// 单文件上限 1 GB（NSIS 一般 < 200 MB、Portable < 300 MB，留余量）
+export const HTTP_MAX_FILE_SIZE = 1024 * 1024 * 1024
+// 5 分钟无下载活动自动关闭发布服务
+export const HTTP_IDLE_TIMEOUT_MS = 5 * 60 * 1000
+// 客户端下载超时（30s 无字节视为断流）
+export const HTTP_DOWNLOAD_IDLE_TIMEOUT_MS = 30 * 1000
+// 版本重广播周期（兜底断网恢复的 LAN 节点）
+export const VERSION_BROADCAST_REPEAT_MS = 5 * 60 * 1000
 

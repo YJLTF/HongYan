@@ -11,10 +11,6 @@ export const useChatStore = defineStore('chat', () => {
     messages.value = records
   }
 
-  function addMessage(record: ChatRecord) {
-    messages.value.push(record)
-  }
-
   function updateMessageStatus(messageId: string, status: string) {
     const msg = messages.value.find((m) => m.id === messageId)
     if (msg) {
@@ -27,5 +23,5 @@ export const useChatStore = defineStore('chat', () => {
     currentPeerId.value = ''
   }
 
-  return { messages, currentPeerId, setMessages, addMessage, updateMessageStatus, clearMessages }
+  return { messages, currentPeerId, setMessages, updateMessageStatus, clearMessages }
 })

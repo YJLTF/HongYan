@@ -16,10 +16,12 @@ import { hasPendingNegotiation } from './crypto/key-negotiation'
 import { clearIdentity } from './crypto/identity'
 import { createPacket } from './network/protocol'
 import { registerIpcHandlers } from './ipc/ipc-handlers'
-import { setMainWindow, getMainWindow, pushFriendOnline, pushFriendOffline, pushMessageReceived, pushFileTransferRequest, pushGroupMessageReceived, pushGroupCreated } from './ipc/ipc-push'
+import { setMainWindow, getMainWindow, pushFriendOnline, pushFriendOffline, pushMessageReceived, pushFileTransferRequest, pushGroupMessageReceived, pushGroupCreated, pushUpdatePublishStatus } from './ipc/ipc-push'
 import { createTray, destroyTray, showMainWindow as showTrayMainWindow } from './tray'
 import { initFlashManager, notify as flashNotify, attachFocusAutoClear } from './notifications/flash-manager'
 import { initNotificationManager, showMessage as notifMessage, showFileRequest as notifFileRequest } from './notifications/notification-manager'
+import { updatePublisher } from './services/update-publisher'
+import { registerUpdateReceiver } from './services/update-receiver'
 import { GROUP_PACKET_KINDS } from '@shared/types'
 import type { AppConfig, ProtocolPacket, ChatRecord, FileTransferRecord } from '@shared/types'
 import { MessageType, MessageStatus, FileTransferStatus } from '@shared/types'
@@ -206,6 +208,16 @@ async function initApp(): Promise<void> {
     )
   )
   log.info('Notification manager initialized')
+
+  // V1.5.0: 发布方状态变化推送到渲染端
+  updatePublisher.onStatusChange((status) => {
+    pushUpdatePublishStatus(status)
+  })
+  log.info('Update publisher status bridge initialized')
+
+  // V1.5.0: 注册版本公告接收桥
+  registerUpdateReceiver()
+  log.info('Update receiver registered')
 
   log.info('Application started successfully')
 }
@@ -529,6 +541,8 @@ async function shutdownApp(): Promise<void> {
   destroyTray()
   // V1.2.0: 优雅退出时广播下线公告，让好友立即知道本机已下线
   friendDiscoveryService.stop({ graceful: true })
+  // V1.5.0: 停止 HTTP 发布服务并解绑端口（await 确保 server.close 完成再退出）
+  await updatePublisher.stopPublish()
   stopTcpServer()
   closeDatabase()
   cryptoService.destroy()

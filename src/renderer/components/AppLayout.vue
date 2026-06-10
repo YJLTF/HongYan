@@ -3,7 +3,7 @@
     <!-- 左侧导航栏 -->
     <aside class="sidebar-nav">
       <div class="nav-header">
-        <div class="user-avatar" @click="showSettings = true">
+        <div class="user-avatar" @click="currentView = 'settings'">
           <img v-if="configStore.avatar" :src="configStore.avatar" alt="avatar" />
           <div v-else class="avatar-placeholder">{{ getInitials(configStore.nickname) }}</div>
         </div>
@@ -54,7 +54,7 @@
         </button>
       </nav>
       <div class="nav-footer">
-        <button class="nav-item" title="设置" @click="showSettings = true">
+        <button class="nav-item" :class="{ active: currentView === 'settings' }" title="设置" @click="currentView = 'settings'">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="3"/>
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
@@ -131,10 +131,10 @@
         @openChat="switchToChat"
       />
       <FileTransferView v-else-if="currentView === 'transfers'" />
+      <SettingsView v-else-if="currentView === 'settings'" />
     </main>
 
     <!-- 模态框 -->
-    <SettingsView :visible="showSettings" @close="showSettings = false" />
     <ImageViewer 
       :visible="showImageViewer" 
       :imageData="currentImageData" 
@@ -191,6 +191,16 @@
     <!-- 通知提示 -->
     <NotificationToast ref="notificationRef" />
 
+    <!-- V1.5.0: 版本可用横幅 -->
+    <UpdateNotificationBanner @view="handleViewUpdate" />
+
+    <!-- V1.5.0: 下载对话框 -->
+    <UpdateDownloadDialog
+      v-if="activeUpdateRecord"
+      :record="activeUpdateRecord"
+      @close="activeUpdateRecord = null"
+    />
+
     <!-- 网段扫描配置面板 -->
     <div v-if="showScanConfig" class="modal-overlay" @click.self="showScanConfig = false">
       <ScanConfigPanel 
@@ -218,17 +228,21 @@ import FileTransferView from './FileTransferView.vue'
 import ImageViewer from './ImageViewer.vue'
 import NotificationToast from './NotificationToast.vue'
 import ScanConfigPanel from './ScanConfigPanel.vue'
+import UpdateNotificationBanner from './UpdateNotificationBanner.vue'
+import UpdateDownloadDialog from './UpdateDownloadDialog.vue'
+import { useUpdateStore } from '../stores/update-store'
+import type { AvailableUpdate } from '@shared/types'
 
 const friendStore = useFriendStore()
 const chatStore = useChatStore()
 const transferStore = useTransferStore()
 const configStore = useConfigStore()
 const groupStore = useGroupStore()
+const updateStore = useUpdateStore()
 
 const notificationRef = ref<any>(null)
 
-const currentView = ref<'chat' | 'groups' | 'contacts' | 'transfers'>('chat')
-const showSettings = ref(false)
+const currentView = ref<'chat' | 'groups' | 'contacts' | 'transfers' | 'settings'>('chat')
 const showImageViewer = ref(false)
 const showScanConfig = ref(false)
 const showInviteDialog = ref(false)
@@ -236,6 +250,11 @@ const activeInvite = ref<PendingInvite | null>(null)
 const currentImageData = ref('')
 const searchQuery = ref('')
 const isRefreshing = ref(false)
+const activeUpdateRecord = ref<AvailableUpdate | null>(null)
+
+function handleViewUpdate(rec: AvailableUpdate) {
+  activeUpdateRecord.value = rec
+}
 
 const cleanups: (() => void)[] = []
 
@@ -418,21 +437,17 @@ onMounted(async () => {
     })
   )
 
-  // V1.3.0: 启动时检查是否需要展示"已升级到 V1.3.0"的功能提示
-  // 仅在从未提示过且 closeToTray=true（默认）时展示一次
-  const TIP_KEY = 'hongyan.v1.3.0.feature-tip-shown'
-  if (!localStorage.getItem(TIP_KEY)) {
-    setTimeout(() => {
-      notificationRef.value?.showNotification(
-        'info',
-        'V1.3.0 已支持托盘和系统通知',
-        '关闭主窗口将自动隐藏到系统托盘（不再直接退出）。可在「设置 → 消息提醒」中调整横幅、任务栏闪烁、免打扰等行为。',
-        undefined,
-        8000
-      )
-      localStorage.setItem(TIP_KEY, '1')
-    }, 1500)
-  }
+  // V1.5.0: 版本分发事件监听
+  cleanups.push(
+    window.electronAPI.on('update:publish-status', (status: any) => {
+      // 状态变化由 UpdatePublish 组件的 onMounted 拉取，此处可空操作或广播
+    })
+  )
+
+  // V1.5.0: 加载收端可用更新
+  try {
+    await updateStore.refreshAvailable()
+  } catch (_) { /* ignore */ }
 
   watchSelectedFriend()
 })

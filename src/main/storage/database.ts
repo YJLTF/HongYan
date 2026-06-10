@@ -5,7 +5,7 @@ import { Low } from 'lowdb'
 import { JSONFile } from 'lowdb/node'
 import { DB_NAME, getAppDataDir, FILES_DIR, LOGS_DIR } from '@shared/constants'
 import { ConversationType } from '@shared/types'
-import type { ChatRecord, Friend, FileTransferRecord, AppConfig, Group } from '@shared/types'
+import type { ChatRecord, Friend, FileTransferRecord, AppConfig, Group, PublishedUpdate, AvailableUpdate } from '@shared/types'
 import log from 'electron-log'
 
 interface DatabaseSchema {
@@ -14,6 +14,10 @@ interface DatabaseSchema {
   fileTransfers: FileTransferRecord[]
   // V1.4.0: 群组
   groups: Group[]
+  // V1.5.0: 我作为发布方发起的版本更新
+  publishedUpdates: PublishedUpdate[]
+  // V1.5.0: 收端收到的可用更新
+  availableUpdates: AvailableUpdate[]
 }
 
 let db: Low<DatabaseSchema> | null = null
@@ -65,6 +69,8 @@ export async function initDatabase(config?: AppConfig): Promise<Low<DatabaseSche
     friends: [],
     fileTransfers: [],
     groups: [],
+    publishedUpdates: [],
+    availableUpdates: [],
   }
 
   const adapter = new JSONFile<DatabaseSchema>(dbPath)
@@ -80,6 +86,18 @@ export async function initDatabase(config?: AppConfig): Promise<Low<DatabaseSche
     log.info('Migrating database: adding groups collection')
     ;(db.data as any).groups = []
   }
+
+  // V1.5.0: 旧库迁移 - 补 publishedUpdates 字段
+  if (!Array.isArray((db.data as any).publishedUpdates)) {
+    log.info('Migrating database: adding publishedUpdates collection')
+    ;(db.data as any).publishedUpdates = []
+  }
+  // V1.5.0 修复: availableUpdates 已改为纯内存（瞬态），清空磁盘上的残留
+  // 否则上次运行残留的过期记录会让接收方重启后看到"幽灵更新通知"，点下载必 ECONNREFUSED
+  if (Array.isArray((db.data as any).availableUpdates) && (db.data as any).availableUpdates.length > 0) {
+    log.info('Clearing stale availableUpdates from disk:', (db.data as any).availableUpdates.length, 'entries')
+  }
+  ;(db.data as any).availableUpdates = []
 
   // V1.4.0: 旧库迁移 - 给 1:1 聊天记录补 conversationType
   let migratedCount = 0

@@ -117,6 +117,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useTransferStore } from '../stores/transfer-store'
+import { formatSize } from '@shared/format'
+import { getFileTransferStatusText } from '@shared/file-transfer'
 import type { FileTransferRecord, FileTransferStatus } from '@shared/types'
 
 defineProps<{ visible: boolean }>()
@@ -125,24 +127,8 @@ defineEmits(['close'])
 const store = useTransferStore()
 const transfers = computed(() => store.transfers)
 
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
-  if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB'
-  return (bytes / 1073741824).toFixed(1) + ' GB'
-}
-
 function getStatusText(status: FileTransferStatus): string {
-  const statusMap: Record<FileTransferStatus, string> = {
-    pending: '等待接受',
-    accepted: '已接受',
-    rejected: '已拒绝',
-    transferring: '传输中',
-    completed: '已完成',
-    failed: '失败',
-    interrupted: '中断'
-  }
-  return statusMap[status] || status
+  return getFileTransferStatusText(status)
 }
 
 function showProgress(status: FileTransferStatus): boolean {
