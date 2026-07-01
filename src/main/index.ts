@@ -26,7 +26,7 @@ import { GROUP_PACKET_KINDS } from '@shared/types'
 import type { AppConfig, ProtocolPacket, ChatRecord, FileTransferRecord } from '@shared/types'
 import { MessageType, MessageStatus, FileTransferStatus } from '@shared/types'
 import crypto from 'crypto'
-import { FILES_DIR, LOGS_DIR, DB_NAME, CONFIG_FILE, LEGACY_APP_DATA_DIR, LEGACY_DB_FILE } from '@shared/constants'
+import { FILES_DIR, LOGS_DIR, DB_NAME, CONFIG_FILE, MASTER_KEY_FILE, IDENTITY_KEY_FILE, LEGACY_APP_DATA_DIR, LEGACY_DB_FILE } from '@shared/constants'
 
 log.transports.file.level = 'info'
 log.transports.console.level = 'info'
@@ -226,9 +226,14 @@ async function initApp(): Promise<void> {
 }
 
 // V1.6.0 改名迁移：应用曾用名「鸿雁 (HongYan)」，默认数据目录为 HongYan。
-// 改名后默认目录变为 Abcd。首次启动新版时把旧目录下的全部数据文件迁到新目录，
-// 保证 identity.json / master.key / 数据库 / files / logs 等不丢失、行为一致。
+// 改名后默认目录变为 Abcd。首次启动新版时把旧目录下的核心身份文件迁到新目录，
+// 保证 identity.json / master.key / identity.key 不丢失。
+//
 // 必须在 loadConfig() 之前执行——否则旧 identity.json 读不到会生成新 peerId，丢失好友与历史。
+//
+// 边界情况：旧版 identity.json 可能设了 userDataDir（自定义数据路径）。
+// 此时真实数据（db/files/logs/group-keys）在自定义路径，旧默认目录中只含过期副本。
+// 为防覆盖真实数据，仅迁移身份文件，其余交给下游 migrateDataIfNeeded 处理。
 async function migrateFromLegacyDataDir(): Promise<void> {
   // 显式设置 ABCD_DATA_DIR（多实例测试）时由用户自行指定目录，不做改名迁移
   if (process.env.ABCD_DATA_DIR) return
@@ -253,14 +258,45 @@ async function migrateFromLegacyDataDir(): Promise<void> {
   if (!fs.existsSync(newDir)) {
     fs.mkdirSync(newDir, { recursive: true })
   }
-  copyDirectory(oldDir, newDir)
 
-  // 旧数据库文件名为 hongyan.json，新版期望 abcd.json —— 重命名（不覆盖已存在的 abcd.json）
-  const legacyDbPath = path.join(newDir, LEGACY_DB_FILE)
-  const newDbPath = path.join(newDir, DB_NAME.replace('.db', '.json'))
-  if (fs.existsSync(legacyDbPath) && !fs.existsSync(newDbPath)) {
-    fs.renameSync(legacyDbPath, newDbPath)
-    log.info(`Renamed db file ${LEGACY_DB_FILE} -> ${path.basename(newDbPath)}`)
+  // 读取旧 identity.json，判断是否设了 userDataDir
+  const oldConfigPath = path.join(oldDir, CONFIG_FILE)
+  let hasUserDataDir = false
+  if (fs.existsSync(oldConfigPath)) {
+    try {
+      const raw = fs.readFileSync(oldConfigPath, 'utf-8')
+      const oldConfig = JSON.parse(raw) as AppConfig
+      if (oldConfig.userDataDir) {
+        hasUserDataDir = true
+        log.info('Old config has userDataDir set, will only migrate identity files')
+      }
+    } catch { /* ignore parse errors */ }
+  }
+
+  // 核心身份文件始终在默认目录，必须迁移
+  for (const file of [CONFIG_FILE, MASTER_KEY_FILE, IDENTITY_KEY_FILE]) {
+    const src = path.join(oldDir, file)
+    const dest = path.join(newDir, file)
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, dest)
+      log.info(`Migrated ${file}`)
+    }
+  }
+
+  if (hasUserDataDir) {
+    // 真实数据在自定义路径，不迁移旧默认目录中的过期副本
+    log.info('Skipping data file migration (userDataDir is set, real data resides elsewhere)')
+  } else {
+    // 无自定义路径：全部数据都在默认目录，完整迁移
+    copyDirectory(oldDir, newDir)
+
+    // 旧数据库文件名为 hongyan.json，新版期望 abcd.json —— 重命名
+    const legacyDbPath = path.join(newDir, LEGACY_DB_FILE)
+    const newDbPath = path.join(newDir, DB_NAME.replace('.db', '.json'))
+    if (fs.existsSync(legacyDbPath) && !fs.existsSync(newDbPath)) {
+      fs.renameSync(legacyDbPath, newDbPath)
+      log.info(`Renamed db file ${LEGACY_DB_FILE} -> ${path.basename(newDbPath)}`)
+    }
   }
 
   log.info('Legacy data migration completed')
