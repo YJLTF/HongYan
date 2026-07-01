@@ -29,7 +29,7 @@ start "Message Test 3" cmd /c "set MESSAGE_DATA_DIR=Message-Test3&& set MESSAGE_
 echo.
 echo All instances launched!
 echo Instance 1: UDP 19876, TCP 19877, data dir Message-Test1
-echo Instance 2: UDP 19878, TCP 19779, data dir Message-Test2
+echo Instance 2: UDP 19878, TCP 19879, data dir Message-Test2
 echo Instance 3: UDP 19880, TCP 19881, data dir Message-Test3
 echo.
 echo Note: They may not discover each other automatically.

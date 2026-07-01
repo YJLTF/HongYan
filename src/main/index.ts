@@ -26,7 +26,7 @@ import { GROUP_PACKET_KINDS } from '@shared/types'
 import type { AppConfig, ProtocolPacket, ChatRecord, FileTransferRecord } from '@shared/types'
 import { MessageType, MessageStatus, FileTransferStatus } from '@shared/types'
 import crypto from 'crypto'
-import { FILES_DIR, LOGS_DIR, DB_NAME } from '@shared/constants'
+import { FILES_DIR, LOGS_DIR, DB_NAME, MASTER_KEY_FILE, CONFIG_FILE, IDENTITY_KEY_FILE } from '@shared/constants'
 
 log.transports.file.level = 'info'
 log.transports.console.level = 'info'
@@ -279,8 +279,14 @@ async function migrateDataIfNeeded(config: AppConfig): Promise<void> {
 /**
  * 从旧版默认数据目录 (HongYan) 迁移到新版默认数据目录 (Message)
  * 旧版数据库文件名为 hongyan.json（源自 hongyan.db），新版为 message.json（源自 message.db）
+ * 仅在使用默认数据目录（未设置环境变量）时执行
  */
 async function migrateFromOldDefaultDir(): Promise<void> {
+  // 如果设置了环境变量（多实例测试/dev 模式），跳过旧目录迁移
+  if (process.env.MESSAGE_DATA_DIR || process.env.HONGYAN_DATA_DIR) {
+    return
+  }
+
   const appDataPath = app.getPath('appData')
   const oldDefaultDir = path.join(appDataPath, OLD_DEFAULT_APP_DATA_DIR)
   const newDefaultDir = getDefaultDataDir()
