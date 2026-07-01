@@ -1,0 +1,32 @@
+{
+  "appId": "com.message.messenger",
+  "productName": "Message",
+  "copyright": "Copyright 2026 Message",
+  "directories": {
+    "output": "out/win7"
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "npmRebuild": false,
+  "asar": false,
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      },
+      {
+        "target": "portable",
+        "arch": ["x64"]
+      }
+    ]
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true
+  },
+  "extraMetadata": {
+    "name": "message"
+  }
+}

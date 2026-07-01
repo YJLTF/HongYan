@@ -35,7 +35,7 @@ interface DpapiResult {
 function runPowerShellScript(script: string): string {
   const { execFileSync } = require('child_process') as typeof import('child_process')
   const os = require('os') as typeof import('os')
-  const scriptPath = path.join(os.tmpdir(), `hongyan-dpapi-${process.pid}-${Date.now()}.ps1`)
+  const scriptPath = path.join(os.tmpdir(), `message-dpapi-${process.pid}-${Date.now()}.ps1`)
   fs.writeFileSync(scriptPath, script, { encoding: 'utf-8' })
   try {
     return execFileSync('powershell.exe', [

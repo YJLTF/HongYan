@@ -17,7 +17,7 @@ import log from 'electron-log'
 
 // 检测是否处于多实例/开发模式
 function isMultiInstanceMode(): boolean {
-  return process.env.NODE_ENV === 'development' || !!process.env.HONGYAN_DATA_DIR
+  return process.env.NODE_ENV === 'development' || !!process.env.MESSAGE_DATA_DIR || !!process.env.HONGYAN_DATA_DIR
 }
 
 // 注意：每次调用时读取端口，避免在模块加载时 env var 尚未生效

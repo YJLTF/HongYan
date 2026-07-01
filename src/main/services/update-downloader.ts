@@ -107,7 +107,7 @@ class UpdateDownloader {
 
   private getDownloadDir(jobId: string): string {
     const base = app.getPath('temp')
-    return path.join(base, 'HongYanUpdate', jobId)
+    return path.join(base, 'MessageUpdate', jobId)
   }
 
   private streamDownload(

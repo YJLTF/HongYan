@@ -19,7 +19,7 @@ const pendingKeyDeliveries = new Map<string, Set<string>>()
 // V1.4.0 修复：群密钥原本只在内存，重启后丢失导致"No group key available"。
 // 改为加密持久化到 ${dataDir}/group-keys.json，启动时由 loadAllGroupKeys() 恢复。
 const GROUP_KEYS_FILE = 'group-keys.json'
-const GROUP_KEYS_AAD = 'hongyan-group-keys-v1'
+const GROUP_KEYS_AAD = 'message-group-keys-v1'
 const GROUP_KEYS_FORMAT_VERSION = 1
 
 function getGroupKeysPath(): string {

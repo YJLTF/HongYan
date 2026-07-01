@@ -33,7 +33,7 @@ log.transports.console.level = 'info'
 
 // V1.3.0: Windows Toast 通知需要 AppUserModelID，否则会归到 electron.exe 名下
 if (process.platform === 'win32') {
-  app.setAppUserModelId('com.hongyan.messenger')
+  app.setAppUserModelId('com.message.messenger')
 }
 
 let mainWindow: BrowserWindow | null = null
@@ -78,7 +78,7 @@ function createWindow(): void {
     height: 650,
     minWidth: 700,
     minHeight: 500,
-    title: '鸿雁',
+    title: 'Message',
     icon: path.join(
       __dirname,
       process.env.VITE_DEV_SERVER_URL
@@ -142,8 +142,8 @@ function setupApplicationMenu(): void {
 }
 
 async function initApp(): Promise<void> {
-  log.info('Initializing HongYan...')
-  log.info('HONGYAN_DATA_DIR env:', process.env.HONGYAN_DATA_DIR || '(not set, using default)')
+  log.info('Initializing Message...')
+  log.info('MESSAGE_DATA_DIR env:', process.env.MESSAGE_DATA_DIR || process.env.HONGYAN_DATA_DIR || '(not set, using default)')
 
   // 先加载配置，获取 userDataDir 设置
   let config = storageService.loadConfig()
@@ -222,17 +222,24 @@ async function initApp(): Promise<void> {
   log.info('Application started successfully')
 }
 
+// 旧版默认数据目录名（用于迁移）
+const OLD_DEFAULT_APP_DATA_DIR = 'HongYan'
+const OLD_DB_NAME = 'hongyan.db'
+
 // 检查并迁移数据到新的 userDataDir
 async function migrateDataIfNeeded(config: AppConfig): Promise<void> {
+  // === 第一步：从旧版默认目录 HongYan 迁移到新版默认目录 Message ===
+  // 当用户从旧版升级时，%appdata%/HongYan 下已有数据，需要迁移到 %appdata%/Message
+  await migrateFromOldDefaultDir()
+
+  // === 第二步：从默认目录迁移到自定义 userDataDir（已有逻辑） ===
   const oldDir = getDefaultDataDir()
   const newDir = getDataDir(config)
 
-  // 如果新旧目录相同，或者新目录已存在（已有数据），不需要迁移
   if (oldDir === newDir) {
     return
   }
 
-  // 检查旧目录是否有数据需要迁移
   const dbPath = path.join(oldDir, DB_NAME.replace('.db', '.json'))
   if (!fs.existsSync(dbPath)) {
     log.info('No data to migrate from default directory')
@@ -241,21 +248,17 @@ async function migrateDataIfNeeded(config: AppConfig): Promise<void> {
 
   log.info(`Migrating data from ${oldDir} to ${newDir}`)
 
-  // 确保新目录存在
   if (!fs.existsSync(newDir)) {
     fs.mkdirSync(newDir, { recursive: true })
   }
 
-  // 迁移数据库文件
   const newDbPath = path.join(newDir, DB_NAME.replace('.db', '.json'))
   const oldDbStat = fs.statSync(dbPath)
-  // 只迁移有数据的数据库
-  if (oldDbStat.size > 50) { // 空数据库文件大约50字节
+  if (oldDbStat.size > 50) {
     fs.copyFileSync(dbPath, newDbPath)
     log.info('Database file migrated')
   }
 
-  // 迁移 files 目录
   const oldFilesDir = path.join(oldDir, FILES_DIR)
   if (fs.existsSync(oldFilesDir)) {
     const newFilesDir = path.join(newDir, FILES_DIR)
@@ -263,7 +266,6 @@ async function migrateDataIfNeeded(config: AppConfig): Promise<void> {
     log.info('Files directory migrated')
   }
 
-  // 迁移 logs 目录
   const oldLogsDir = path.join(oldDir, LOGS_DIR)
   if (fs.existsSync(oldLogsDir)) {
     const newLogsDir = path.join(newDir, LOGS_DIR)
@@ -272,6 +274,87 @@ async function migrateDataIfNeeded(config: AppConfig): Promise<void> {
   }
 
   log.info('Data migration completed')
+}
+
+/**
+ * 从旧版默认数据目录 (HongYan) 迁移到新版默认数据目录 (Message)
+ * 旧版数据库文件名为 hongyan.json（源自 hongyan.db），新版为 message.json（源自 message.db）
+ */
+async function migrateFromOldDefaultDir(): Promise<void> {
+  const appDataPath = app.getPath('appData')
+  const oldDefaultDir = path.join(appDataPath, OLD_DEFAULT_APP_DATA_DIR)
+  const newDefaultDir = getDefaultDataDir()
+
+  // 新旧目录相同 → 无需迁移
+  if (oldDefaultDir === newDefaultDir) {
+    return
+  }
+
+  // 旧目录不存在 → 无需迁移
+  if (!fs.existsSync(oldDefaultDir)) {
+    return
+  }
+
+  // 新目录已有数据 → 跳过（说明已迁移过）
+  if (fs.existsSync(newDefaultDir)) {
+    log.info('New default data dir already exists, skipping migration from old HongYan dir')
+    return
+  }
+
+  log.info(`Migrating data from old default dir ${oldDefaultDir} to new default dir ${newDefaultDir}`)
+
+  // 迁移数据库文件（旧版 hongyan.json → 新版 message.json）
+  const oldDbName = OLD_DB_NAME.replace('.db', '.json')
+  const newDbName = DB_NAME.replace('.db', '.json')
+  const oldDbPath = path.join(oldDefaultDir, oldDbName)
+  if (fs.existsSync(oldDbPath)) {
+    const newDbPath = path.join(newDefaultDir, newDbName)
+    const oldDbStat = fs.statSync(oldDbPath)
+    if (oldDbStat.size > 50) {
+      if (!fs.existsSync(newDefaultDir)) {
+        fs.mkdirSync(newDefaultDir, { recursive: true })
+      }
+      fs.copyFileSync(oldDbPath, newDbPath)
+      log.info('Database file migrated from old HongYan dir')
+    }
+  }
+
+  // 迁移 files 目录
+  const oldFilesDir = path.join(oldDefaultDir, FILES_DIR)
+  if (fs.existsSync(oldFilesDir)) {
+    const newFilesDir = path.join(newDefaultDir, FILES_DIR)
+    copyDirectory(oldFilesDir, newFilesDir)
+    log.info('Files directory migrated from old HongYan dir')
+  }
+
+  // 迁移 logs 目录
+  const oldLogsDir = path.join(oldDefaultDir, LOGS_DIR)
+  if (fs.existsSync(oldLogsDir)) {
+    const newLogsDir = path.join(newDefaultDir, LOGS_DIR)
+    copyDirectory(oldLogsDir, newLogsDir)
+    log.info('Logs directory migrated from old HongYan dir')
+  }
+
+  // 迁移其他配置文件（master.key, identity.json, identity.key, group-keys.json）
+  const configFilesToMigrate = [
+    MASTER_KEY_FILE,
+    CONFIG_FILE,
+    IDENTITY_KEY_FILE,
+    'group-keys.json',
+  ]
+  for (const fileName of configFilesToMigrate) {
+    const oldPath = path.join(oldDefaultDir, fileName)
+    if (fs.existsSync(oldPath)) {
+      const newPath = path.join(newDefaultDir, fileName)
+      if (!fs.existsSync(newDefaultDir)) {
+        fs.mkdirSync(newDefaultDir, { recursive: true })
+      }
+      fs.copyFileSync(oldPath, newPath)
+      log.info(`Migrated config file: ${fileName}`)
+    }
+  }
+
+  log.info('Data migration from old HongYan dir completed')
 }
 
 function copyDirectory(src: string, dest: string): void {
@@ -536,7 +619,7 @@ async function handleKeyNegotiation(packet: ProtocolPacket, peerIp: string): Pro
 }
 
 async function shutdownApp(): Promise<void> {
-  log.info('Shutting down HongYan...')
+  log.info('Shutting down Message...')
   isQuitting = true
   destroyTray()
   // V1.2.0: 优雅退出时广播下线公告，让好友立即知道本机已下线
@@ -547,7 +630,7 @@ async function shutdownApp(): Promise<void> {
   closeDatabase()
   cryptoService.destroy()
   clearIdentity()
-  log.info('HongYan shutdown complete')
+  log.info('Message shutdown complete')
 }
 
 app.whenReady().then(initApp).catch((err) => {

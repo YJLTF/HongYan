@@ -53,7 +53,7 @@ async function downloadImage() {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `hongyan_image_${Date.now()}.png`
+    link.download = `message_image_${Date.now()}.png`
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)

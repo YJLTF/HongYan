@@ -1,4 +1,4 @@
-# Test script to launch three HongYan instances (PowerShell)
+# Test script to launch three Message instances (PowerShell)
 # Each instance gets its own data dir and ports so they don't collide.
 #
 # V1.4.0: Upgraded from 2 to 3 instances for group chat testing.
@@ -12,7 +12,7 @@
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 Write-Host "=========================================" -ForegroundColor DarkCyan
-Write-Host "  HongYan Triple Instance Launcher" -ForegroundColor Cyan
+Write-Host "  Message Triple Instance Launcher" -ForegroundColor Cyan
 Write-Host "=========================================" -ForegroundColor DarkCyan
 Write-Host ""
 
@@ -30,11 +30,11 @@ if (-not (Test-Path "$ScriptDir\dist\main\index.js")) {
 }
 
 # Start Instance 1
-Write-Host "Starting HongYan Instance 1..." -ForegroundColor Green
-Write-Host "  Data dir: HongYan-Test1" -ForegroundColor Gray
+Write-Host "Starting Message Instance 1..." -ForegroundColor Green
+Write-Host "  Data dir: Message-Test1" -ForegroundColor Gray
 Write-Host "  UDP port: 19876" -ForegroundColor Gray
 Write-Host "  TCP port: 19877" -ForegroundColor Gray
-$cmd1 = 'set HONGYAN_DATA_DIR=HongYan-Test1&& set HONGYAN_UDP_PORT=19876&& set HONGYAN_TCP_PORT=19877&& npx electron dist/main/index.js'
+$cmd1 = 'set MESSAGE_DATA_DIR=Message-Test1&& set MESSAGE_UDP_PORT=19876&& set MESSAGE_TCP_PORT=19877&& npx electron dist/main/index.js'
 Start-Process -FilePath "cmd.exe" -ArgumentList "/c", $cmd1 -WorkingDirectory $ScriptDir -WindowStyle Normal
 Write-Host "  v Instance 1 started!" -ForegroundColor Green
 Write-Host ""
@@ -42,11 +42,11 @@ Write-Host ""
 Start-Sleep -Seconds 2
 
 # Start Instance 2
-Write-Host "Starting HongYan Instance 2..." -ForegroundColor Cyan
-Write-Host "  Data dir: HongYan-Test2" -ForegroundColor Gray
+Write-Host "Starting Message Instance 2..." -ForegroundColor Cyan
+Write-Host "  Data dir: Message-Test2" -ForegroundColor Gray
 Write-Host "  UDP port: 19878" -ForegroundColor Gray
 Write-Host "  TCP port: 19879" -ForegroundColor Gray
-$cmd2 = 'set HONGYAN_DATA_DIR=HongYan-Test2&& set HONGYAN_UDP_PORT=19878&& set HONGYAN_TCP_PORT=19879&& npx electron dist/main/index.js'
+$cmd2 = 'set MESSAGE_DATA_DIR=Message-Test2&& set MESSAGE_UDP_PORT=19878&& set MESSAGE_TCP_PORT=19879&& npx electron dist/main/index.js'
 Start-Process -FilePath "cmd.exe" -ArgumentList "/c", $cmd2 -WorkingDirectory $ScriptDir -WindowStyle Normal
 Write-Host "  v Instance 2 started!" -ForegroundColor Cyan
 Write-Host ""
@@ -54,11 +54,11 @@ Write-Host ""
 Start-Sleep -Seconds 2
 
 # Start Instance 3
-Write-Host "Starting HongYan Instance 3..." -ForegroundColor Magenta
-Write-Host "  Data dir: HongYan-Test3" -ForegroundColor Gray
+Write-Host "Starting Message Instance 3..." -ForegroundColor Magenta
+Write-Host "  Data dir: Message-Test3" -ForegroundColor Gray
 Write-Host "  UDP port: 19880" -ForegroundColor Gray
 Write-Host "  TCP port: 19881" -ForegroundColor Gray
-$cmd3 = 'set HONGYAN_DATA_DIR=HongYan-Test3&& set HONGYAN_UDP_PORT=19880&& set HONGYAN_TCP_PORT=19881&& npx electron dist/main/index.js'
+$cmd3 = 'set MESSAGE_DATA_DIR=Message-Test3&& set MESSAGE_UDP_PORT=19880&& set MESSAGE_TCP_PORT=19881&& npx electron dist/main/index.js'
 Start-Process -FilePath "cmd.exe" -ArgumentList "/c", $cmd3 -WorkingDirectory $ScriptDir -WindowStyle Normal
 Write-Host "  v Instance 3 started!" -ForegroundColor Magenta
 Write-Host ""
@@ -68,17 +68,17 @@ Write-Host "  All instances launched successfully!" -ForegroundColor Yellow
 Write-Host "=========================================" -ForegroundColor DarkCyan
 Write-Host ""
 Write-Host "  Instance 1 (Green):" -ForegroundColor Green
-Write-Host "    Data: HongYan-Test1"
+Write-Host "    Data: Message-Test1"
 Write-Host "    UDP:  19876"
 Write-Host "    TCP:  19877"
 Write-Host ""
 Write-Host "  Instance 2 (Cyan):" -ForegroundColor Cyan
-Write-Host "    Data: HongYan-Test2"
+Write-Host "    Data: Message-Test2"
 Write-Host "    UDP:  19878"
 Write-Host "    TCP:  19879"
 Write-Host ""
 Write-Host "  Instance 3 (Magenta):" -ForegroundColor Magenta
-Write-Host "    Data: HongYan-Test3"
+Write-Host "    Data: Message-Test3"
 Write-Host "    UDP:  19880"
 Write-Host "    TCP:  19881"
 Write-Host ""

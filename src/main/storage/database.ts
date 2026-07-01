@@ -35,11 +35,13 @@ export function getDefaultDataDir(): string {
 }
 
 // 根据配置获取数据目录
-// 优先级：HONGYAN_DATA_DIR 环境变量 > config.userDataDir > 默认目录
+// 优先级：MESSAGE_DATA_DIR/HONGYAN_DATA_DIR 环境变量 > config.userDataDir > 默认目录
 // 环境变量优先级最高，目的是支持多实例测试/dev 模式下的目录隔离
+// 兼容旧版 HONGYAN_DATA_DIR 环境变量
 export function getDataDir(config?: AppConfig): string {
-  if (process.env.HONGYAN_DATA_DIR) {
-    return path.join(app.getPath('appData'), process.env.HONGYAN_DATA_DIR)
+  const envDataDir = process.env.MESSAGE_DATA_DIR || process.env.HONGYAN_DATA_DIR
+  if (envDataDir) {
+    return path.join(app.getPath('appData'), envDataDir)
   }
   if (config?.userDataDir) {
     return config.userDataDir

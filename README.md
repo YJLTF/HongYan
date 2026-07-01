@@ -1,4 +1,4 @@
-# 鸿雁 (HongYan) - 局域网点对点即时通讯工具
+# Message - 局域网点对点即时通讯工具
 
 一款基于 Electron 构建的局域网（LAN）点对点（P2P）即时通讯桌面应用，无需中心服务器，同一局域网内的用户可以自动发现彼此并进行加密通讯与文件传输。
 
@@ -26,7 +26,7 @@
 
 ### 通讯能力
 
-- **好友自动发现** — 事件驱动 UDP 广播，同一局域网内自动感知其他鸿雁用户
+- **好友自动发现** — 事件驱动 UDP 广播，同一局域网内自动感知其他Message用户
 - **点对点加密通讯** — ECDH (x25519) 密钥协商 + AES-256-GCM 端到端加密
 - **文字 / 图片 / 文件消息** — 文字消息与图片消息一对一收发；文件支持分块传输、接受/拒绝、MD5 完整性校验，单文件最大 2 GB
 - **仿微信群聊** — 创建/邀请/退出/解散群、@ 提及、群消息加密、群密钥轮换、群文件共享，单群最多 50 人
@@ -159,7 +159,7 @@ npm run package:nsis
 6. 点击「扫描」按钮可手动扫描指定网段（输入 CIDR）
 7. 点击「设置」可修改昵称、查看 Peer ID、配置心跳间隔（关闭 / 30s / 60s / 2min / 5min）
 8. 点击「传输」可查看文件传输进度，接收方可接受或拒绝文件
-9. 关闭主窗口默认**最小化到系统托盘**；通过托盘菜单的「显示主窗口 / 退出鸿雁」唤起或彻底退出
+9. 关闭主窗口默认**最小化到系统托盘**；通过托盘菜单的「显示主窗口 / 退出Message」唤起或彻底退出
 10. 窗口未聚焦时收到新消息会触发**任务栏闪烁 + Windows 横幅通知**，可在「设置 → 消息提醒」中关闭
 11. 关闭应用时会自动广播 `announcement-leaving` 公告
 
@@ -186,9 +186,9 @@ npm run package:nsis
 - 生产打包版本自动优化网络策略，减少不必要的广播流量
 - 生产环境仅使用标准端口（UDP 19876，TCP 19877-19886）
 - 内网部署建议配置防火墙允许上述端口通信
-- 如需修改默认端口，可通过环境变量 `HONGYAN_UDP_PORT` 和 `HONGYAN_TCP_PORT` 指定
-- 如需修改数据目录，可通过设置页「自定义数据目录」或环境变量 `HONGYAN_DATA_DIR` 指定
-- `HONGYAN_DATA_DIR` 的优先级高于 `identity.json` 里的 `userDataDir` 设置（用于多实例测试隔离）
+- 如需修改默认端口，可通过环境变量 `MESSAGE_UDP_PORT` 和 `MESSAGE_TCP_PORT` 指定
+- 如需修改数据目录，可通过设置页「自定义数据目录」或环境变量 `MESSAGE_DATA_DIR` 指定
+- `MESSAGE_DATA_DIR` 的优先级高于 `identity.json` 里的 `userDataDir` 设置（用于多实例测试隔离）
 
 ---
 
@@ -295,10 +295,10 @@ calculateOnlineTimeoutMs(heartbeat):
 
 | 常量 / Getter | 默认值 | 说明 |
 |------|----|------|
-| `getUdpPort()` | 19876 | UDP 广播端口（可被 `HONGYAN_UDP_PORT` 覆盖） |
-| `getTcpPortDefault()` | 19877 | TCP 起始端口（可被 `HONGYAN_TCP_PORT` 覆盖） |
+| `getUdpPort()` | 19876 | UDP 广播端口（可被 `MESSAGE_UDP_PORT` 覆盖） |
+| `getTcpPortDefault()` | 19877 | TCP 起始端口（可被 `MESSAGE_TCP_PORT` 覆盖） |
 | `getTcpPortMax()` | `getTcpPortDefault() + 9` | TCP 端口范围上限 |
-| `getAppDataDir()` | `HongYan` | 数据目录名（可被 `HONGYAN_DATA_DIR` 覆盖） |
+| `getAppDataDir()` | `Message` | 数据目录名（可被 `MESSAGE_DATA_DIR` 覆盖） |
 | `DEFAULT_HEARTBEAT_INTERVAL_MS` | 60000 | 低频心跳兜底间隔（0 = 关闭） |
 | `calculateOnlineTimeoutMs()` | 函数 | 动态计算在线超时，公式 `max(30s, heartbeat × 2)` |
 | `SIGNATURE_MAX_AGE_MS` | 300000 | 签名包允许的最大时间偏移（5 分钟） |
@@ -314,21 +314,21 @@ calculateOnlineTimeoutMs(heartbeat):
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
 | `NODE_ENV` | 运行环境（development/production），影响广播频率和扫描端口策略 | - |
-| `HONGYAN_UDP_PORT` | 自定义 UDP 端口 | 19876 |
-| `HONGYAN_TCP_PORT` | 自定义 TCP 起始端口 | 19877 |
-| `HONGYAN_DATA_DIR` | 自定义数据目录名（追加在 `%APPDATA%/` 下）；设置后自动进入多实例模式 | `HongYan` |
+| `MESSAGE_UDP_PORT` | 自定义 UDP 端口 | 19876 |
+| `MESSAGE_TCP_PORT` | 自定义 TCP 起始端口 | 19877 |
+| `MESSAGE_DATA_DIR` | 自定义数据目录名（追加在 `%APPDATA%/` 下）；设置后自动进入多实例模式 | `Message` |
 
 ---
 
 ## 数据存储
 
-应用数据目录：`%APPDATA%/<HONGYAN_DATA_DIR>/`（默认 `HongYan`）
+应用数据目录：`%APPDATA%/<MESSAGE_DATA_DIR>/`（默认 `Message`）
 
-> 优先级：`HONGYAN_DATA_DIR` 环境变量 > `identity.json` 中的 `userDataDir` > 默认 `HongYan`
+> 优先级：`MESSAGE_DATA_DIR` 环境变量 > `identity.json` 中的 `userDataDir` > 默认 `Message`
 
 | 文件 | 说明 |
 |------|------|
-| `hongyan.json` | lowdb 数据库（聊天记录、好友、文件传输记录、群组、发布/可用更新） |
+| `message.json` | lowdb 数据库（聊天记录、好友、文件传输记录、群组、发布/可用更新） |
 | `master.key` | 主密钥文件 (DPAPI 加密) |
 | `identity.json` | 身份配置（Peer ID、昵称、userDataDir、heartbeatIntervalMs） |
 | `identity.key` | Ed25519 身份密钥（公钥明文 + 私钥 AES-256-GCM 加密） |
@@ -354,15 +354,15 @@ npm run test:multi:bat
 
 | 实例 | 数据目录 | UDP 端口 | TCP 端口 |
 |------|----------|----------|----------|
-| Instance 1 | `%APPDATA%/HongYan-Test1/` | 19876 | 19877 |
-| Instance 2 | `%APPDATA%/HongYan-Test2/` | 19878 | 19879 |
-| Instance 3 | `%APPDATA%/HongYan-Test3/` | 19880 | 19881 |
+| Instance 1 | `%APPDATA%/Message-Test1/` | 19876 | 19877 |
+| Instance 2 | `%APPDATA%/Message-Test2/` | 19878 | 19879 |
+| Instance 3 | `%APPDATA%/Message-Test3/` | 19880 | 19881 |
 
 ### 工作原理
 
-- **数据隔离**：`HONGYAN_DATA_DIR` 优先级最高，覆盖 `identity.json` 里的 `userDataDir` 设置，让三个实例的数据库/主密钥/日志完全分开
+- **数据隔离**：`MESSAGE_DATA_DIR` 优先级最高，覆盖 `identity.json` 里的 `userDataDir` 设置，让三个实例的数据库/主密钥/日志完全分开
 - **端口隔离**：每个实例绑定独立的 UDP/TCP 端口，不会冲突
-- **自动发现**：检测到 `HONGYAN_DATA_DIR` 被设置时，自动切换到多实例广播模式
+- **自动发现**：检测到 `MESSAGE_DATA_DIR` 被设置时，自动切换到多实例广播模式
   - 广播目标端口范围扩大为 19876-19880（每个实例都往所有端口发）
   - 同时往 `127.0.0.1` 发，绕开 LAN 路由器/防火墙，确保同机多个实例能互相发现
   - 10 秒内双方应自动出现在好友列表里
@@ -372,9 +372,9 @@ npm run test:multi:bat
 ### 重置测试环境
 
 ```bash
-rd /s /q "%APPDATA%\HongYan-Test1"
-rd /s /q "%APPDATA%\HongYan-Test2"
-rd /s /q "%APPDATA%\HongYan-Test3"
+rd /s /q "%APPDATA%\Message-Test1"
+rd /s /q "%APPDATA%\Message-Test2"
+rd /s /q "%APPDATA%\Message-Test3"
 ```
 
 ---
@@ -398,7 +398,7 @@ V1.1.0 的 `encryptWithDPAPI` 在某些 PowerShell 环境下会返回空 buffer�
 **手动恢复（推荐，对数据安全敏感的用户）**：
 
 1. 关闭应用
-2. 备份数据目录（特别是 `hongyan.json`）
+2. 备份数据目录（特别是 `message.json`）
 3. 删除 `master.key` 和 `identity.key`
 4. 重启应用 → 重新生成随机 32 字节 master key 和新的 Ed25519 身份
 5. ⚠️ **旧聊天记录将无法解密**（因 master key 已变），但 Peer ID、好友列表、文件传输记录不受影响
@@ -451,8 +451,8 @@ V1.1.0 的 `encryptWithDPAPI` 在某些 PowerShell 环境下会返回空 buffer�
     "publisherPeerId": "<uuid>",
     "publisherNickname": "Alice",
     "httpPort": 19890,
-    "nsis":     { "filename": "HongYan-1.5.0-x64.exe",     "size": 12345678, "sha256": "<hex>" },
-    "portable": { "filename": "HongYan-1.5.0-portable.exe", "size": 12345678, "sha256": "<hex>" },
+    "nsis":     { "filename": "Message-1.5.0-x64.exe",     "size": 12345678, "sha256": "<hex>" },
+    "portable": { "filename": "Message-1.5.0-portable.exe", "size": 12345678, "sha256": "<hex>" },
     "note": "修复群文件下载问题",
     "timestamp": 1700000000000,
     "stopped": false,
@@ -484,7 +484,7 @@ V1.1.0 的 `encryptWithDPAPI` 在某些 PowerShell 环境下会返回空 buffer�
 
 1. 收端从 `version-announcement` 取出 `publisherIp` + `httpPort` + `nsis/portable` 元信息
 2. 渲染端选 NSIS 或 Portable，调 `update:start-download` IPC
-3. 主进程 `update-downloader.ts` 通过 `http.get` 流式下载到 `%TEMP%/HongYanUpdate/<jobId>/`
+3. 主进程 `update-downloader.ts` 通过 `http.get` 流式下载到 `%TEMP%/MessageUpdate/<jobId>/`
 4. 边下边算 SHA-256，进度通过 `update:download-progress` 推送
 5. 校验通过 → `update:download-complete` → 渲染端调 `update:open-installer` 触发 `shell.openPath`
 
@@ -581,7 +581,7 @@ V1.4.0 主功能发布后，在三实例实测中又迭代了一轮：
 
 | 修复 | 说明 |
 |---|---|
-| **群密钥磁盘持久化** | 原实现群密钥仅存内存，应用重启后丢失，发文件报 `No group key available`。改为 AES-256-GCM 加密存到 `${dataDir}/group-keys.json`（用 master key + aad `hongyan-group-keys-v1`），启动时 `loadAllGroupKeys()` 恢复 |
+| **群密钥磁盘持久化** | 原实现群密钥仅存内存，应用重启后丢失，发文件报 `No group key available`。改为 AES-256-GCM 加密存到 `${dataDir}/group-keys.json`（用 master key + aad `message-group-keys-v1`），启动时 `loadAllGroupKeys()` 恢复 |
 | **密钥自动重同步** | 即使双方密钥都丢失（如老群在持久化修复前建的），成员发消息时会自动 `KEY_RESYNC` 请求 owner，owner 收到后用现有 key 回传（若 owner 也没 key 则发 nack 让请求方秒失败） |
 | **群文件共享** | 完整实现：owner 把文件 md5+暂存到 `files/<messageId>_<name>`，广播群消息（type=`file`），成员点"下载"触发 `file-share-request`，owner 复用现有 file-transfer-service 走 `file-request`（带 `fromGroupShare:true`，接收方静默接收不弹私聊 UI） |
 | **@ 浮层不打开 bug** | 原 watcher 加了 `cursor > lastMentionEnd` 守卫，但 `lastMentionEnd` 初值 0 误判了"首次输入 @"：导致用户第一次按 `@` 时就被强制关闭浮层。移除该守卫，只保留 `suppressMentionWatch` 标志位（selectMention 触发 text 变化时跳过 watcher）+ `nextTick` 移光标 + `textareaRef.value.value === newText` 保护 |
@@ -601,7 +601,7 @@ V1.3.0 改变了**关闭窗口**的默认行为：
 | 行为 | V1.2.0 | V1.3.0（默认）|
 |---|---|---|
 | 点窗口右上角 × | 退出整个应用 | **最小化到系统托盘** |
-| 真正退出 | × / Alt+F4 | 托盘菜单 → 退出鸿雁 |
+| 真正退出 | × / Alt+F4 | 托盘菜单 → 退出Message |
 
 这是**有意设计**——让应用像微信、QQ 等通讯工具一样常驻托盘，确保新消息能被及时收到。
 
@@ -611,7 +611,7 @@ V1.3.0 改变了**关闭窗口**的默认行为：
 
 | 功能 | 说明 |
 |---|---|
-| 系统托盘 | 托盘图标 + 上下文菜单（显示主窗口 / 退出鸿雁） |
+| 系统托盘 | 托盘图标 + 上下文菜单（显示主窗口 / 退出Message） |
 | 任务栏闪烁 | 窗口未聚焦时收到新消息，任务栏图标持续闪烁 |
 | Windows Toast 横幅 | 收到消息/文件请求时弹原生系统通知，点击唤起窗口 |
 | 托盘图标闪烁 | 最小化到托盘后收到新消息，托盘图标带红点闪烁 |
@@ -623,7 +623,7 @@ V1.3.0 改变了**关闭窗口**的默认行为：
 |---|---|---|
 | 提醒机制 | 仅 in-app toast | 三源提醒：横幅 + 任务栏 + 托盘 |
 | 窗口关闭 | 直接退出 | 默认隐藏到托盘，菜单/quit IPC 退出 |
-| AppUserModelID | 未设置（Windows Toast 归到 electron.exe）| `com.hongyan.messenger`，toast 归到 HongYan 名下 |
+| AppUserModelID | 未设置（Windows Toast 归到 electron.exe）| `com.message.messenger`，toast 归到 Message 名下 |
 | 配置项 | nickname / heartbeat / userDataDir | + closeToTray / enableNotifications / enableTaskbarFlash / enableTrayFlash / dndEnabled / dndStart / dndEnd |
 
 #### 兼容性
