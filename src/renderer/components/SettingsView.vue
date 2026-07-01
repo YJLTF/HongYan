@@ -300,17 +300,17 @@
               <div class="about-logo">
                 <img
                   :src="appIconUrl"
-                  alt="鸿雁"
+                  alt="阿卜兹的"
                   class="about-logo-img"
                   @error="logoLoadFailed = true"
                 />
-                <div v-if="logoLoadFailed" class="about-logo-placeholder">鸿</div>
+                <div v-if="logoLoadFailed" class="about-logo-placeholder">阿</div>
               </div>
-              <p class="app-name">鸿雁 (HongYan)</p>
+              <p class="app-name">阿卜兹的 (Abcd)</p>
               <p class="version">版本 {{ appStore.version || '—' }}</p>
               <p class="description">局域网点对点即时通讯工具</p>
               <div class="about-divider"></div>
-              <p class="copyright">Copyright © 2026 HongYan</p>
+              <p class="copyright">Copyright © 2026 Abcd</p>
             </div>
           </section>
         </div>
@@ -456,7 +456,7 @@ onMounted(async () => {
       localConfig.value.downloadPath = `${homeDir}\\Downloads`
     }
 
-    // 如果没有设置 userDataDir，显示当前实际使用的目录（受 HONGYAN_DATA_DIR 环境变量影响）
+    // 如果没有设置 userDataDir，显示当前实际使用的目录（受 ABCD_DATA_DIR 环境变量影响）
     if (!localConfig.value.userDataDir) {
       localConfig.value.userDataDir = await window.electronAPI.invoke('app:get-data-dir')
     }

@@ -26,14 +26,14 @@ import { GROUP_PACKET_KINDS } from '@shared/types'
 import type { AppConfig, ProtocolPacket, ChatRecord, FileTransferRecord } from '@shared/types'
 import { MessageType, MessageStatus, FileTransferStatus } from '@shared/types'
 import crypto from 'crypto'
-import { FILES_DIR, LOGS_DIR, DB_NAME } from '@shared/constants'
+import { FILES_DIR, LOGS_DIR, DB_NAME, CONFIG_FILE, LEGACY_APP_DATA_DIR, LEGACY_DB_FILE } from '@shared/constants'
 
 log.transports.file.level = 'info'
 log.transports.console.level = 'info'
 
 // V1.3.0: Windows Toast 通知需要 AppUserModelID，否则会归到 electron.exe 名下
 if (process.platform === 'win32') {
-  app.setAppUserModelId('com.hongyan.messenger')
+  app.setAppUserModelId('com.abcd.messenger')
 }
 
 let mainWindow: BrowserWindow | null = null
@@ -78,7 +78,7 @@ function createWindow(): void {
     height: 650,
     minWidth: 700,
     minHeight: 500,
-    title: '鸿雁',
+    title: '阿卜兹的',
     icon: path.join(
       __dirname,
       process.env.VITE_DEV_SERVER_URL
@@ -142,8 +142,11 @@ function setupApplicationMenu(): void {
 }
 
 async function initApp(): Promise<void> {
-  log.info('Initializing HongYan...')
-  log.info('HONGYAN_DATA_DIR env:', process.env.HONGYAN_DATA_DIR || '(not set, using default)')
+  log.info('Initializing Abcd...')
+  log.info('ABCD_DATA_DIR env:', process.env.ABCD_DATA_DIR || '(not set, using default)')
+
+  // V1.6.0 改名迁移：必须在加载配置之前执行，否则旧的 identity.json 读不到会生成新 peerId，丢失好友/历史
+  await migrateFromLegacyDataDir()
 
   // 先加载配置，获取 userDataDir 设置
   let config = storageService.loadConfig()
@@ -220,6 +223,47 @@ async function initApp(): Promise<void> {
   log.info('Update receiver registered')
 
   log.info('Application started successfully')
+}
+
+// V1.6.0 改名迁移：应用曾用名「鸿雁 (HongYan)」，默认数据目录为 HongYan。
+// 改名后默认目录变为 Abcd。首次启动新版时把旧目录下的全部数据文件迁到新目录，
+// 保证 identity.json / master.key / 数据库 / files / logs 等不丢失、行为一致。
+// 必须在 loadConfig() 之前执行——否则旧 identity.json 读不到会生成新 peerId，丢失好友与历史。
+async function migrateFromLegacyDataDir(): Promise<void> {
+  // 显式设置 ABCD_DATA_DIR（多实例测试）时由用户自行指定目录，不做改名迁移
+  if (process.env.ABCD_DATA_DIR) return
+
+  const appData = app.getPath('appData')
+  const oldDir = path.join(appData, LEGACY_APP_DATA_DIR)
+  const newDir = getDefaultDataDir() // %APPDATA%/Abcd
+
+  if (oldDir === newDir) return
+  if (!fs.existsSync(oldDir)) {
+    log.info('No legacy data dir to migrate from')
+    return
+  }
+  // 新目录已存在 identity.json 说明已迁移过或已用新版初始化过，跳过避免覆盖
+  const newConfigPath = path.join(newDir, CONFIG_FILE)
+  if (fs.existsSync(newConfigPath)) {
+    log.info('New data dir already initialized, skip legacy migration')
+    return
+  }
+
+  log.info(`Migrating legacy data from ${oldDir} to ${newDir}`)
+  if (!fs.existsSync(newDir)) {
+    fs.mkdirSync(newDir, { recursive: true })
+  }
+  copyDirectory(oldDir, newDir)
+
+  // 旧数据库文件名为 hongyan.json，新版期望 abcd.json —— 重命名（不覆盖已存在的 abcd.json）
+  const legacyDbPath = path.join(newDir, LEGACY_DB_FILE)
+  const newDbPath = path.join(newDir, DB_NAME.replace('.db', '.json'))
+  if (fs.existsSync(legacyDbPath) && !fs.existsSync(newDbPath)) {
+    fs.renameSync(legacyDbPath, newDbPath)
+    log.info(`Renamed db file ${LEGACY_DB_FILE} -> ${path.basename(newDbPath)}`)
+  }
+
+  log.info('Legacy data migration completed')
 }
 
 // 检查并迁移数据到新的 userDataDir
@@ -536,7 +580,7 @@ async function handleKeyNegotiation(packet: ProtocolPacket, peerIp: string): Pro
 }
 
 async function shutdownApp(): Promise<void> {
-  log.info('Shutting down HongYan...')
+  log.info('Shutting down Abcd...')
   isQuitting = true
   destroyTray()
   // V1.2.0: 优雅退出时广播下线公告，让好友立即知道本机已下线
@@ -547,7 +591,7 @@ async function shutdownApp(): Promise<void> {
   closeDatabase()
   cryptoService.destroy()
   clearIdentity()
-  log.info('HongYan shutdown complete')
+  log.info('Abcd shutdown complete')
 }
 
 app.whenReady().then(initApp).catch((err) => {

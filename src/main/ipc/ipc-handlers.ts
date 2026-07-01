@@ -253,7 +253,7 @@ export function registerIpcHandlers(): void {
     return v
   })
 
-  // 返回当前实例真实使用的数据目录（已综合 HONGYAN_DATA_DIR 环境变量和配置中的 userDataDir）
+  // 返回当前实例真实使用的数据目录（已综合 ABCD_DATA_DIR 环境变量和配置中的 userDataDir）
   ipcMain.handle('app:get-data-dir', () => {
     return getDataDir(storageService.loadConfig() ?? undefined)
   })

@@ -19,7 +19,10 @@ const pendingKeyDeliveries = new Map<string, Set<string>>()
 // V1.4.0 修复：群密钥原本只在内存，重启后丢失导致"No group key available"。
 // 改为加密持久化到 ${dataDir}/group-keys.json，启动时由 loadAllGroupKeys() 恢复。
 const GROUP_KEYS_FILE = 'group-keys.json'
-const GROUP_KEYS_AAD = 'hongyan-group-keys-v1'
+const GROUP_KEYS_AAD = 'abcd-group-keys-v1'
+// V1.6.0 改名遗留：旧版用 hongyan-group-keys-v1 作为 AES-GCM AAD。
+// loadAllGroupKeys() 在新 AAD 解密失败时回退到旧 AAD，并立即用新 AAD 重新加密落盘，保证平滑迁移。
+const LEGACY_GROUP_KEYS_AAD = 'hongyan-group-keys-v1'
 const GROUP_KEYS_FORMAT_VERSION = 1
 
 function getGroupKeysPath(): string {
@@ -61,6 +64,17 @@ function persistGroupKeys(): void {
   }
 }
 
+// 用指定 AAD 解密 group-keys.json 负载，成功返回明文，失败抛出
+function decryptGroupKeysPayload(masterKey: Buffer, payload: any, aad: string): string {
+  const iv = Buffer.from(payload.iv, 'base64')
+  const tag = Buffer.from(payload.tag, 'base64')
+  const ciphertext = Buffer.from(payload.data, 'base64')
+  const decipher = crypto.createDecipheriv('aes-256-gcm', masterKey, iv)
+  decipher.setAAD(Buffer.from(aad, 'utf-8'))
+  decipher.setAuthTag(tag)
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf-8')
+}
+
 export function loadAllGroupKeys(): void {
   try {
     const filePath = getGroupKeysPath()
@@ -79,13 +93,18 @@ export function loadAllGroupKeys(): void {
       log.warn(`Unknown group-keys file version: ${payload.v}, skip`)
       return
     }
-    const iv = Buffer.from(payload.iv, 'base64')
-    const tag = Buffer.from(payload.tag, 'base64')
-    const ciphertext = Buffer.from(payload.data, 'base64')
-    const decipher = crypto.createDecipheriv('aes-256-gcm', masterKey, iv)
-    decipher.setAAD(Buffer.from(GROUP_KEYS_AAD, 'utf-8'))
-    decipher.setAuthTag(tag)
-    const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf-8')
+
+    // V1.6.0: 优先用新 AAD 解密；失败则回退到旧 AAD，并用新 AAD 重新加密落盘
+    let plaintext: string
+    let usedLegacyAad = false
+    try {
+      plaintext = decryptGroupKeysPayload(masterKey, payload, GROUP_KEYS_AAD)
+    } catch (e) {
+      log.info('Group keys decrypt with new AAD failed, trying legacy AAD:', (e as Error).message)
+      plaintext = decryptGroupKeysPayload(masterKey, payload, LEGACY_GROUP_KEYS_AAD)
+      usedLegacyAad = true
+    }
+
     const data = JSON.parse(plaintext) as Record<string, Record<string, { key: string; createdAt: number }>>
     let totalKeys = 0
     for (const [groupId, versions] of Object.entries(data)) {
@@ -100,6 +119,12 @@ export function loadAllGroupKeys(): void {
       groupKeys.set(groupId, vMap)
     }
     log.info(`Loaded ${groupKeys.size} groups (${totalKeys} keys) from ${GROUP_KEYS_FILE}`)
+
+    // 用旧 AAD 解密成功 → 用新 AAD 重新加密落盘，避免每次启动都回退
+    if (usedLegacyAad) {
+      log.info('Re-encrypting group keys with new AAD after legacy migration')
+      persistGroupKeys()
+    }
   } catch (err) {
     log.error('Failed to load group keys:', err)
   }

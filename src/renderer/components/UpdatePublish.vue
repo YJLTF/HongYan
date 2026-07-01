@@ -2,7 +2,7 @@
   <div class="update-publish-view">
     <div class="view-header">
       <h2>版本分发</h2>
-      <p class="subtitle">选择一组新版本分发包，鸿雁将向所有低版本好友广播升级通知</p>
+      <p class="subtitle">选择一组新版本分发包，阿卜兹的将向所有低版本好友广播升级通知</p>
     </div>
 
     <!-- 当前发布状态 -->
@@ -114,7 +114,7 @@
           <line x1="12" y1="9" x2="12" y2="13"/>
           <line x1="12" y1="17" x2="12.01" y2="17"/>
         </svg>
-        <span>发布后鸿雁将在 LAN 启用临时 HTTP 下载服务（默认 :19890）。Windows 防火墙首次可能弹窗询问是否允许 node.exe 监听，请选择「允许」。</span>
+        <span>发布后阿卜兹的将在 LAN 启用临时 HTTP 下载服务（默认 :19890）。Windows 防火墙首次可能弹窗询问是否允许 node.exe 监听，请选择「允许」。</span>
       </div>
 
       <div class="form-actions">

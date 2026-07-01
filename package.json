@@ -1,7 +1,7 @@
 {
-  "name": "hongyan",
+  "name": "abcd",
   "version": "1.5.0",
-  "description": "HongYan LAN P2P Messenger",
+  "description": "Abcd LAN P2P Messenger",
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -42,9 +42,9 @@
     "vue-tsc": "^2.1.0"
   },
   "build": {
-    "appId": "com.hongyan.messenger",
-    "productName": "HongYan",
-    "copyright": "Copyright 2026 HongYan",
+    "appId": "com.abcd.messenger",
+    "productName": "Abcd",
+    "copyright": "Copyright 2026 Abcd",
     "directories": {
       "output": "out"
     },

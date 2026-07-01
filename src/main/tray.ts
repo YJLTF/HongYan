@@ -49,7 +49,7 @@ function buildContextMenu(getWindow: () => BrowserWindow | null): Electron.Menu 
     },
     { type: 'separator' },
     {
-      label: '退出鸿雁',
+      label: '退出阿卜兹的',
       click: () => {
         log.info('User selected Quit from tray menu')
         app.quit()

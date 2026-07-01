@@ -1,13 +1,13 @@
-// 注意：HONGYAN_UDP_PORT / HONGYAN_TCP_PORT / HONGYAN_DATA_DIR 这些环境变量
+// 注意：ABCD_UDP_PORT / ABCD_TCP_PORT / ABCD_DATA_DIR 这些环境变量
 // 在 npx / electron 子进程链中可能比本模块的加载晚生效，因此必须以函数形式
 // 在调用时读取，而不能在模块加载时缓存为常量。
 
 export function getUdpPort(): number {
-  return process.env.HONGYAN_UDP_PORT ? parseInt(process.env.HONGYAN_UDP_PORT, 10) : 19876
+  return process.env.ABCD_UDP_PORT ? parseInt(process.env.ABCD_UDP_PORT, 10) : 19876
 }
 
 export function getTcpPortDefault(): number {
-  return process.env.HONGYAN_TCP_PORT ? parseInt(process.env.HONGYAN_TCP_PORT, 10) : 19877
+  return process.env.ABCD_TCP_PORT ? parseInt(process.env.ABCD_TCP_PORT, 10) : 19877
 }
 
 export function getTcpPortMax(): number {
@@ -15,8 +15,14 @@ export function getTcpPortMax(): number {
 }
 
 export function getAppDataDir(): string {
-  return process.env.HONGYAN_DATA_DIR || 'HongYan'
+  return process.env.ABCD_DATA_DIR || 'Abcd'
 }
+
+// V1.6.0 改名遗留：应用曾用名「鸿雁 (HongYan)」，默认数据目录为 HongYan。
+// 启动迁移时若检测到该旧目录，会把其中的数据文件迁到新的 Abcd 目录，保证更新后数据不丢失。
+export const LEGACY_APP_DATA_DIR = 'HongYan'
+// 旧 DB 文件名（DB_NAME.replace('.db', '.json') => hongyan.json），迁移时需重命名为 abcd.json
+export const LEGACY_DB_FILE = 'hongyan.json'
 
 export const BROADCAST_INTERVAL_MS = process.env.NODE_ENV === 'development' ? 5000 : 10000
 
@@ -51,7 +57,7 @@ export const ANNOUNCEMENT_KIND = {
 export const KEY_EXPIRY_MS = 3600000
 export const FILE_CHUNK_SIZE = 65536
 export const MAX_FILE_SIZE = 2147483648
-export const DB_NAME = 'hongyan.db'
+export const DB_NAME = 'abcd.db'
 export const MASTER_KEY_FILE = 'master.key'
 export const CONFIG_FILE = 'identity.json'
 // V1.2.0: Ed25519 身份密钥文件（私钥用 master.key 加密后存储）
@@ -63,7 +69,7 @@ export const LOGS_DIR = 'logs'
 // 主进程通过 __dirname + getTrayIconRelative() 解析到具体路径（dev 与 prod 分支见 tray.ts）
 export const TRAY_ICON_NORMAL = 'tray-normal.png'
 export const TRAY_ICON_ACTIVE = 'tray-active.png'
-export const TRAY_TOOLTIP = '鸿雁 HongYan'
+export const TRAY_TOOLTIP = '阿卜兹的 Abcd'
 
 // ============================================================
 // V1.4.0: 群聊相关常量
@@ -89,7 +95,7 @@ export const GROUP_MESSAGE_MAX_RETRIES = 3
 
 // 多实例测试时扩展的 UDP 扫描端口
 // V1.4.0: 支持 3 实例，UDP 19876/78/80 + TCP 19877/79/81
-// 多实例模式（设置了 HONGYAN_DATA_DIR）下扫描范围
+// 多实例模式（设置了 ABCD_DATA_DIR）下扫描范围
 export const MULTI_INSTANCE_UDP_PORTS = [19876, 19878, 19880]
 export const MULTI_INSTANCE_UDP_SCAN_PORTS = [19876, 19878, 19880]
 
