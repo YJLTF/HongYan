@@ -2,7 +2,7 @@
   "name": "message",
   "version": "1.6.0",
   "description": "Message LAN P2P Messenger",
-  "main": "dist/main/index.js",
+  "main": "dist/main/index.cjs",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
@@ -33,7 +33,7 @@
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.0",
     "cross-env": "^10.1.0",
-    "electron": "^42.3.3",
+    "electron": "22.3.27",
     "electron-builder": "^26.15.0",
     "electron-vite": "^5.0.0",
     "pinia": "^2.2.0",
