@@ -12,7 +12,7 @@ export default defineConfig(({ command, mode }) => {
     main: {
       build: {
         outDir: 'dist/main',
-        externalizeDeps: true,
+        externalizeDeps: false,
         rollupOptions: {
           input: resolve(root, 'src/main/index.ts'),
         },
@@ -30,11 +30,11 @@ export default defineConfig(({ command, mode }) => {
     preload: {
       build: {
         outDir: 'dist/preload',
-        externalizeDeps: false,
+        externalizeDeps: true,
         rollupOptions: {
           input: resolve(root, 'src/preload/index.ts'),
           output: {
-            entryFileNames: 'index.mjs',
+            entryFileNames: 'index.cjs',
           },
         },
       },

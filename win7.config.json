@@ -6,7 +6,8 @@
     "output": "out/win7"
   },
   "files": [
-    "dist/**/*"
+    "dist/**/*",
+    "!**/node_modules/**"
   ],
   "npmRebuild": false,
   "electronDownload": {
@@ -27,7 +28,11 @@
   },
   "nsis": {
     "oneClick": false,
-    "allowToChangeInstallationDirectory": true
+    "allowToChangeInstallationDirectory": true,
+    "artifactName": "${productName} Setup Win7 ${version}.${ext}"
+  },
+  "portable": {
+    "artifactName": "${productName} Win7 ${version}.${ext}"
   },
   "extraMetadata": {
     "name": "message"
