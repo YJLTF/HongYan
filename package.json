@@ -11,10 +11,7 @@
     "test:multi:bat": "test-multi-instances.bat",
     "package": "cross-env NODE_ENV=production electron-vite build && electron-builder --win",
     "package:portable": "cross-env NODE_ENV=production electron-vite build && electron-builder --win portable",
-    "package:nsis": "cross-env NODE_ENV=production electron-vite build && electron-builder --win nsis",
-    "package:win7": "cross-env NODE_ENV=production electron-vite build && electron-builder --win --config win7.config.json",
-    "package:win7:portable": "cross-env NODE_ENV=production electron-vite build && electron-builder --win portable --config win7.config.json",
-    "package:win7:nsis": "cross-env NODE_ENV=production electron-vite build && electron-builder --win nsis --config win7.config.json"
+    "package:nsis": "cross-env NODE_ENV=production electron-vite build && electron-builder --win nsis"
   },
   "keywords": [
     "lan",
